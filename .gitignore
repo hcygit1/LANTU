@@ -1,0 +1,13 @@
+config.yaml
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+.lantu/*
+!.lantu/config.yaml.example
+.claude/
+CLAUDE.md
