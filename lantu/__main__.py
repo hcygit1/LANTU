@@ -19,16 +19,7 @@ from lantu.hooks import HookConfigError, HookEngine, load_hooks
 from lantu.permissions import PermissionMode
 
 
-def main() -> None:
-    # 先确保 .lantu/ 目录存在，否则下面写 debug.log 会因目录不存在而崩溃
-    Path(".lantu").mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(message)s",
-        filename=".lantu/debug.log",
-        filemode="w",
-    )
-
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantu", description="Lantu AI coding assistant")
     parser.add_argument(
         "--mode",
@@ -54,7 +45,71 @@ def main() -> None:
         default=False,
         help="Start in remote mode: WebSocket server on 0.0.0.0:18888 with browser UI",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Use the legacy fullscreen Textual interface",
+    )
+    return parser
+
+
+def run_tui(config, permission_mode, hook_engine) -> None:
+    from lantu.app import LantuApp
+    from lantu.driver import NoAltScreenDriver
+
+    app = LantuApp(
+        providers=config.providers,
+        permission_mode=permission_mode,
+        mcp_servers=config.mcp_servers,
+        hook_engine=hook_engine,
+        enable_fork=config.enable_fork,
+        enable_verification_agent=config.enable_verification_agent,
+        worktree_config=config.worktree,
+        teammate_mode=config.teammate_mode,
+        enable_coordinator_mode=config.enable_coordinator_mode,
+        driver_class=NoAltScreenDriver,
+        sandbox_config=config.sandbox,
+    )
+    app.run()
+
+
+def run_inline(config, permission_mode, hook_engine) -> None:
+    from lantu.runtime import build_interactive_runtime
+    from lantu.ui.inline import InlineApp
+    from lantu.ui.inline.session import select_provider
+
+    async def start() -> None:
+        provider = await select_provider(config.providers)
+        runtime = await build_interactive_runtime(
+            config,
+            provider,
+            permission_mode,
+            hook_engine,
+            os.getcwd(),
+        )
+        await InlineApp(runtime).run()
+
+    asyncio.run(start())
+
+
+def run_interactive(config, permission_mode, hook_engine, args) -> None:
+    if args.tui:
+        run_tui(config, permission_mode, hook_engine)
+        return
+    run_inline(config, permission_mode, hook_engine)
+
+
+def _main() -> None:
+    # 先确保 .lantu/ 目录存在，否则下面写 debug.log 会因目录不存在而崩溃
+    Path(".lantu").mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(message)s",
+        filename=".lantu/debug.log",
+        filemode="w",
+    )
+
+    args = build_parser().parse_args()
 
     try:
         config = load_config()
@@ -90,23 +145,21 @@ def main() -> None:
         asyncio.run(server.run())
         return
 
-    from lantu.app import LantuApp
-    from lantu.driver import NoAltScreenDriver
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        print(
+            'Error: interactive mode requires a TTY; use `lantu -p "prompt"` instead.',
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    app = LantuApp(
-        providers=config.providers,
-        permission_mode=permission_mode,
-        mcp_servers=config.mcp_servers,
-        hook_engine=hook_engine,
-        enable_fork=config.enable_fork,
-        enable_verification_agent=config.enable_verification_agent,
-        worktree_config=config.worktree,
-        teammate_mode=config.teammate_mode,
-        enable_coordinator_mode=config.enable_coordinator_mode,
-        driver_class=NoAltScreenDriver,
-        sandbox_config=config.sandbox,
-    )
-    app.run()
+    run_interactive(config, permission_mode, hook_engine, args)
+
+
+def main() -> None:
+    try:
+        _main()
+    except KeyboardInterrupt:
+        pass
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
@@ -360,4 +413,3 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
 
 if __name__ == "__main__":
     main()
-
