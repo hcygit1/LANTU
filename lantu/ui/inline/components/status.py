@@ -21,7 +21,7 @@ def render_live_state(state: LiveViewState) -> RenderableType:
     sections.extend(
         render_tool(tool)
         for tool in state.tools.values()
-        if tool.status is ToolStatus.RUNNING
+        if tool.status == ToolStatus.RUNNING
     )
     if state.status_text:
         status = sanitize_terminal_text(state.status_text, preserve_newlines=True)

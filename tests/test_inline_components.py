@@ -28,6 +28,24 @@ def render_text(renderable, width: int = 100) -> str:
     return output.getvalue()
 
 
+class NoSplitlinesString(str):
+    def splitlines(self, *args, **kwargs):
+        raise AssertionError("summary must not call str.splitlines()")
+
+
+class ScanLimitedString(str):
+    def __new__(cls, value: str, iteration_limit: int):
+        instance = super().__new__(cls, value)
+        instance.iteration_limit = iteration_limit
+        return instance
+
+    def __iter__(self):
+        for index, character in enumerate(super().__iter__()):
+            if index >= self.iteration_limit:
+                raise AssertionError("summary scanned beyond its bounded prefix")
+            yield character
+
+
 def test_default_theme_uses_semantic_foreground_styles_only():
     assert DEFAULT_THEME.accent == "bold cyan"
     assert DEFAULT_THEME.text == "default"
@@ -48,6 +66,18 @@ def test_tool_view_state_has_running_defaults():
     assert tool.status is ToolStatus.RUNNING
     assert tool.output == ""
     assert tool.elapsed == 0.0
+
+
+@pytest.mark.parametrize("status", list(ToolStatus))
+def test_tool_view_state_normalizes_string_status(status):
+    tool = ToolViewState("tool-1", "Read", {}, status=status.value)
+
+    assert tool.status is status
+
+
+def test_tool_view_state_rejects_unknown_status():
+    with pytest.raises(ValueError):
+        ToolViewState("tool-1", "Read", {}, status="paused")
 
 
 def test_live_view_state_uses_independent_tool_mappings():
@@ -154,6 +184,33 @@ def test_user_and_assistant_markers_are_distinct():
     assert "● 已完成" in render_text(render_assistant_message("已完成"))
 
 
+def test_assistant_heading_keeps_markdown_semantics():
+    text = render_text(render_assistant_message("# 配置结果"))
+
+    assert "●" in text
+    assert "配置结果" in text
+    assert "# 配置结果" not in text
+
+
+def test_assistant_fenced_code_keeps_markdown_semantics():
+    text = render_text(
+        render_assistant_message('```python\nprint("ok")\n```'),
+        width=120,
+    )
+
+    assert "●" in text
+    assert 'print("ok")' in text
+    assert "```" not in text
+
+
+def test_assistant_list_keeps_first_block_markdown_semantics():
+    text = render_text(render_assistant_message("- 第一项\n- 第二项"))
+
+    assert "●" in text
+    assert "• 第一项" in text
+    assert "• 第二项" in text
+
+
 def test_system_message_is_indented():
     assert "  正在连接" in render_text(render_system_message("正在连接"))
 
@@ -169,9 +226,8 @@ def test_error_has_symbol_without_relying_on_color():
 def test_messages_remove_terminal_controls_but_preserve_newlines(renderer):
     text = render_text(renderer("第一行\n第二行\x1b[2J\x9b0m\x00"))
 
-    lines = text.splitlines()
-    assert "第一行" in lines[0]
-    assert "第二行" in lines[1]
+    assert "第一行" in text
+    assert "第二行" in text
     assert "\x1b" not in text
     assert "\x9b" not in text
     assert "\x00" not in text
@@ -205,6 +261,42 @@ def test_read_tool_counts_lines_from_raw_output():
 
 
 @pytest.mark.parametrize(
+    "separator",
+    ["\r\n", "\r", "\n", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"],
+)
+def test_read_tool_matches_splitlines_for_all_line_boundaries(separator):
+    output = NoSplitlinesString(f"a{separator}b{separator}")
+
+    assert summarize_tool_output("Read", output, False) == "读取 2 行"
+
+
+def test_large_read_and_bash_summaries_do_not_build_splitlines_lists():
+    line_count = 250_000
+    output = NoSplitlinesString("ignored\r\n" * line_count + "  final\tresult  ")
+
+    assert len(output) > 2_000_000
+    assert summarize_tool_output("ReadFile", output, True) == f"读取 {line_count + 1} 行"
+    assert summarize_tool_output("Bash", output, True) == "final result"
+
+
+def test_write_success_does_not_scan_output():
+    output = ScanLimitedString("x" * 2_000_000, iteration_limit=0)
+
+    assert summarize_tool_output("WriteFile", output, False) == "修改已写入"
+
+
+def test_generic_summary_stops_after_bounded_normalized_prefix():
+    output = ScanLimitedString("x" * 2_000_000, iteration_limit=180)
+
+    assert summarize_tool_output("Search", output, False) == "x" * 180
+
+
+def test_read_and_bash_keep_contract_specific_error_summaries():
+    assert summarize_tool_output("Read", "a\nb", True) == "读取 2 行"
+    assert summarize_tool_output("Bash", "first\nlast", True) == "last"
+
+
+@pytest.mark.parametrize(
     ("name", "output", "is_error", "expected"),
     [
         ("WriteFile", "ignored", False, "修改已写入"),
@@ -230,6 +322,13 @@ def test_tool_statuses_use_distinct_visible_symbols():
     assert "◐ Bash pwd" in render_text(render_tool(running))
     assert "✓ Bash pwd" in render_text(render_tool(success))
     assert "✗ Bash pwd" in render_text(render_tool(failed))
+
+
+def test_tool_rendering_falls_back_for_mutated_unknown_status():
+    tool = ToolViewState("t1", "Bash", {"command": "pwd"})
+    tool.status = "paused"
+
+    assert "? Bash pwd" in render_text(render_tool(tool))
 
 
 def test_tool_details_preserve_full_output():
@@ -284,6 +383,14 @@ def test_live_state_renders_non_empty_sections():
     assert "等待工具" in text
     assert "120" in text
     assert "45" in text
+
+
+def test_live_state_accepts_deserialized_running_status():
+    tool = ToolViewState("t1", "ReadFile", {"file_path": "config.py"})
+    tool.status = "running"
+    state = LiveViewState(tools={"t1": tool})
+
+    assert "ReadFile config.py" in render_text(render_live_state(state))
 
 
 def test_transcript_prints_committed_content_once_with_spacing_and_boundary():

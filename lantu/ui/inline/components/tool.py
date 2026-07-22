@@ -14,6 +14,9 @@ _STATUS_MARKERS = {
     ToolStatus.ERROR: ("✗", DEFAULT_THEME.error),
 }
 
+_LINE_BOUNDARIES = frozenset("\n\r\v\f\x1c\x1d\x1e\x85\u2028\u2029")
+_SUMMARY_LIMIT = 180
+
 
 def _safe_inline(value: Any) -> str:
     return sanitize_terminal_text(str(value))
@@ -26,25 +29,109 @@ def _key_argument(state: ToolViewState, name: str) -> str:
         value = state.arguments.get("command", "")
     else:
         value = ""
-    return _safe_inline(value).strip()[:180]
+    return _safe_inline(value).strip()[:_SUMMARY_LIMIT]
+
+
+def _is_terminal_control(character: str) -> bool:
+    codepoint = ord(character)
+    return codepoint < 0x20 or 0x7F <= codepoint <= 0x9F
+
+
+def _count_splitlines(value: str) -> int:
+    if not value:
+        return 0
+
+    count = 0
+    previous_was_cr = False
+    ended_with_boundary = False
+    for character in value:
+        if character == "\n" and previous_was_cr:
+            previous_was_cr = False
+            ended_with_boundary = True
+            continue
+        if character in _LINE_BOUNDARIES:
+            count += 1
+            previous_was_cr = character == "\r"
+            ended_with_boundary = True
+        else:
+            previous_was_cr = False
+            ended_with_boundary = False
+    return count if ended_with_boundary else count + 1
+
+
+def _normalized_prefix(value: str) -> str:
+    result: list[str] = []
+    pending_space = False
+    for character in value:
+        if _is_terminal_control(character):
+            character = " "
+        if character.isspace():
+            pending_space = bool(result)
+            continue
+        if pending_space:
+            result.append(" ")
+            if len(result) == _SUMMARY_LIMIT:
+                break
+            pending_space = False
+        result.append(character)
+        if len(result) == _SUMMARY_LIMIT:
+            break
+    return "".join(result)
+
+
+def _last_nonempty_line(value: str) -> str:
+    current: list[str] = []
+    last = ""
+    pending_space = False
+    previous_was_cr = False
+
+    for character in value:
+        if character == "\n" and previous_was_cr:
+            previous_was_cr = False
+            continue
+        if character in _LINE_BOUNDARIES:
+            if current:
+                last = "".join(current)
+            current = []
+            pending_space = False
+            previous_was_cr = character == "\r"
+            continue
+
+        previous_was_cr = False
+        if _is_terminal_control(character):
+            character = " "
+        if character.isspace():
+            pending_space = bool(current)
+            continue
+        if pending_space:
+            if len(current) < _SUMMARY_LIMIT:
+                current.append(" ")
+            pending_space = False
+        if len(current) < _SUMMARY_LIMIT:
+            current.append(character)
+
+    if current:
+        last = "".join(current)
+    return last or "命令完成"
 
 
 def summarize_tool_output(name: str, output: str, is_error: bool) -> str:
     name = _safe_inline(name).strip()
-    safe_output = sanitize_terminal_text(output, preserve_newlines=True)
-    clean = " ".join(safe_output.strip().split())
     if name in {"Read", "ReadFile"}:
-        return f"读取 {len(output.splitlines())} 行"
+        return f"读取 {_count_splitlines(output)} 行"
     if name in {"Write", "WriteFile", "Edit", "EditFile"}:
-        return "修改已写入" if not is_error else clean[:180]
+        return "修改已写入" if not is_error else _normalized_prefix(output)
     if name == "Bash":
-        lines = [line.strip() for line in safe_output.splitlines() if line.strip()]
-        return (lines[-1] if lines else "命令完成")[:180]
-    return clean[:180]
+        return _last_nonempty_line(output)
+    return _normalized_prefix(output)
 
 
 def render_tool(state: ToolViewState) -> RenderableType:
-    marker, style = _STATUS_MARKERS[state.status]
+    try:
+        status = ToolStatus(state.status)
+    except ValueError:
+        status = None
+    marker, style = _STATUS_MARKERS.get(status, ("?", DEFAULT_THEME.warning))
     safe_name = _safe_inline(state.name).strip()
     argument = _key_argument(state, safe_name)
     title = f"{marker} {safe_name}"
@@ -54,7 +141,7 @@ def render_tool(state: ToolViewState) -> RenderableType:
     summary = summarize_tool_output(
         state.name,
         state.output,
-        state.status is ToolStatus.ERROR,
+        status == ToolStatus.ERROR,
     )
     return Group(
         Text(title, style=style),

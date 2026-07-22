@@ -1,5 +1,6 @@
 from rich.console import RenderableType
 from rich.markdown import Markdown
+from rich.table import Table
 from rich.text import Text
 
 from lantu.ui.shared.formatting import sanitize_terminal_text
@@ -17,8 +18,11 @@ def render_user_message(content: str) -> RenderableType:
 
 
 def render_assistant_message(content: str) -> RenderableType:
-    content_with_hard_breaks = _safe_message(content).replace("\n", "  \n")
-    return Markdown(f"● {content_with_hard_breaks}")
+    message = Table.grid(padding=0)
+    message.add_column(no_wrap=True)
+    message.add_column()
+    message.add_row(Text("● "), Markdown(_safe_message(content)))
+    return message
 
 
 def render_system_message(content: str) -> RenderableType:

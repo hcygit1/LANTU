@@ -18,6 +18,9 @@ class ToolViewState:
     output: str = ""
     elapsed: float = 0.0
 
+    def __post_init__(self) -> None:
+        self.status = ToolStatus(self.status)
+
 
 @dataclass
 class LiveViewState:
