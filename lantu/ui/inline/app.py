@@ -44,6 +44,11 @@ from lantu.ui.shared.references import expand_at_refs
 PERMISSION_CHOICES = ["allow", "always", "deny"]
 PLAN_CHOICES = ["yolo", "manual", "feedback"]
 MAX_PLAN_CONTENT = 64 * 1024
+NOTIFICATION_POLL_INTERVAL = 0.1
+
+
+class _PromptKeyboardInterrupt(Exception):
+    pass
 
 
 class InlineApp:
@@ -82,7 +87,11 @@ class InlineApp:
         self.running = True
         self.confirm_exit = False
         self.pending_prompts: deque[str] = deque()
-        self._pre_plan_mode = self.agent.permission_mode
+        self._pre_plan_mode = (
+            PermissionMode.DEFAULT
+            if self.agent.permission_mode is PermissionMode.PLAN
+            else self.agent.permission_mode
+        )
         self._mcp_injected = False
         self._agent_task: asyncio.Task[None] | None = None
         self._turn_cancel_requested = False
@@ -117,7 +126,9 @@ class InlineApp:
                     if self.pending_prompts:
                         text = self.pending_prompts.popleft()
                     else:
-                        text = await self.prompt.prompt(self.status_text)
+                        text = await self._prompt_or_process_notifications()
+                        if text is None:
+                            continue
                     self.confirm_exit = False
                 except KeyboardInterrupt:
                     if self.confirm_exit:
@@ -141,6 +152,60 @@ class InlineApp:
                 self.live.stop()
             finally:
                 await self.runtime.close()
+
+    async def _prompt_or_process_notifications(self) -> str | None:
+        set_work_dir = getattr(self.prompt, "set_work_dir", None)
+        if callable(set_work_dir):
+            set_work_dir(self.agent.work_dir)
+
+        async def read_prompt() -> str:
+            try:
+                return await self.prompt.prompt(self.status_text)
+            except KeyboardInterrupt as exc:
+                raise _PromptKeyboardInterrupt from exc
+
+        prompt_task = asyncio.create_task(read_prompt())
+        notification_task = asyncio.create_task(
+            self._wait_for_pending_notifications()
+        )
+        try:
+            done, _ = await asyncio.wait(
+                {prompt_task, notification_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if prompt_task in done:
+                notification_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await notification_task
+                try:
+                    return await prompt_task
+                except _PromptKeyboardInterrupt:
+                    raise KeyboardInterrupt from None
+
+            prompt_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await prompt_task
+            await self.process_task_notifications()
+            return None
+        finally:
+            for task in (prompt_task, notification_task):
+                if not task.done():
+                    task.cancel()
+
+    async def _wait_for_pending_notifications(self) -> None:
+        while self.running:
+            task_manager = self.runtime.task_manager
+            has_tasks = getattr(task_manager, "has_completed", None)
+            if callable(has_tasks) and has_tasks():
+                return
+
+            team_manager = self.runtime.team_manager
+            has_team_notes = getattr(
+                team_manager, "has_lead_notifications", None
+            )
+            if callable(has_team_notes) and has_team_notes():
+                return
+            await asyncio.sleep(NOTIFICATION_POLL_INTERVAL)
 
     async def run_prompt_interruptible(self, text: str) -> None:
         loop = asyncio.get_running_loop()

@@ -1175,6 +1175,20 @@ async def test_loop_complete_awaits_plan_approval(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_initial_plan_mode_manual_approval_returns_to_default(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    runtime.agent.set_permission_mode(PermissionMode.PLAN)
+    app = make_app(runtime, prompt=FakePrompt(choices=["manual"]))
+
+    await app.handle_plan_approval()
+
+    assert runtime.agent.permission_mode is PermissionMode.DEFAULT
+    assert len(app.pending_prompts) == 1
+
+
+@pytest.mark.asyncio
 async def test_notifications_trigger_one_guarded_follow_up_turn(tmp_path: Path) -> None:
     task = SimpleNamespace(
         id="task-1",
@@ -1196,6 +1210,93 @@ async def test_notifications_trigger_one_guarded_follow_up_turn(tmp_path: Path) 
 
     assert runtime.agent.run_count == 2
     assert any("后台任务完成" in message for message in app.transcript.system_messages)
+
+
+@pytest.mark.asyncio
+async def test_completed_task_interrupts_idle_prompt_and_notifies_immediately(
+    tmp_path: Path,
+) -> None:
+    task = SimpleNamespace(
+        id="task-idle",
+        name="worker",
+        status="completed",
+        result="done",
+        start_time=0.0,
+        end_time=1.0,
+        progress=SimpleNamespace(input_tokens=0, output_tokens=0),
+    )
+    ready = asyncio.Event()
+
+    class NotificationTaskManager:
+        delivered = False
+
+        def has_completed(self) -> bool:
+            return ready.is_set() and not self.delivered
+
+        def poll_completed(self) -> list[Any]:
+            if not self.has_completed():
+                return []
+            self.delivered = True
+            return [task]
+
+    class IdlePrompt(FakePrompt):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.cancelled = False
+            self.calls = 0
+
+        async def prompt(self, status: str) -> str:
+            self.calls += 1
+            if self.calls > 1:
+                raise EOFError
+            self.started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                self.cancelled = True
+                raise
+
+    runtime = FakeRuntime(tmp_path, [[LoopComplete(1)]])
+    runtime.task_manager = NotificationTaskManager()
+    prompt = IdlePrompt()
+    app = make_app(runtime, prompt=prompt)
+    run_task = asyncio.create_task(app.run())
+    await prompt.started.wait()
+
+    ready.set()
+    await asyncio.wait_for(run_task, timeout=1)
+
+    assert prompt.cancelled
+    assert runtime.agent.run_count == 1
+    assert any(
+        "task-idle" in message for message in app.transcript.system_messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_idle_prompt_syncs_completion_directory_after_worktree_switch(
+    tmp_path: Path,
+) -> None:
+    switched = tmp_path / "worktree"
+    switched.mkdir()
+
+    class WorkDirPrompt(FakePrompt):
+        def __init__(self) -> None:
+            super().__init__()
+            self.work_dirs: list[str] = []
+
+        def set_work_dir(self, work_dir: str) -> None:
+            self.work_dirs.append(work_dir)
+
+    runtime = FakeRuntime(tmp_path)
+    prompt = WorkDirPrompt()
+    app = make_app(runtime, prompt=prompt)
+    runtime.agent.work_dir = str(switched)
+
+    await app.run()
+
+    assert prompt.work_dirs == [str(switched)]
 
 
 @pytest.mark.asyncio

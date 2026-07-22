@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -74,6 +75,33 @@ def _make_context(args: str = "", ui: MockUI | None = None) -> CommandContext:
         ui=ui or MockUI(),
         config={},
     )
+
+
+@pytest.mark.asyncio
+async def test_mcp_command_reads_inline_runtime_connection_state() -> None:
+    from lantu.commands.handlers.mcp import handle_mcp
+
+    ui = MockUI()
+    manager = SimpleNamespace(_clients={"docs": object()})
+    wait_until_ready = AsyncMock()
+    ui.runtime = SimpleNamespace(
+        mcp_manager=manager,
+        wait_until_ready=wait_until_ready,
+    )
+    tools = [
+        SimpleNamespace(name="mcp__docs__search"),
+        SimpleNamespace(name="ReadFile"),
+    ]
+    ctx = _make_context(ui=ui)
+    ctx.agent = SimpleNamespace(
+        registry=SimpleNamespace(list_tools=lambda: tools)
+    )
+
+    await handle_mcp(ctx)
+
+    wait_until_ready.assert_awaited_once_with()
+    assert "Connected to 1 MCP server(s), 1 tools registered" in ui.messages[0]
+    assert "docs: 1 tools" in ui.messages[0]
 
 # ---------------------------------------------------------------------------
 # parse_command
@@ -364,14 +392,19 @@ class TestLegacyTUIExit:
 
         app = LantuApp([])
         app._streaming = True
-        app._agent_task = MagicMock()
-        app._agent_task.done.return_value = False
+
+        async def generate_forever() -> None:
+            await asyncio.Event().wait()
+
+        app._agent_task = asyncio.create_task(generate_forever())
         app._show_system_message = MagicMock()
         app._finish_streaming = MagicMock()
 
         app.agent = MagicMock()
         app.agent.memory_manager = object()
         app.agent._extract_memories = AsyncMock()
+        app.client = MagicMock()
+        app.client.aclose = AsyncMock()
         app.hook_engine = MagicMock()
         app.hook_engine.run_hooks = AsyncMock()
         app._shutdown_mcp = AsyncMock()
@@ -395,8 +428,9 @@ class TestLegacyTUIExit:
         request_exit = app._build_command_context("").config["request_exit"]
         await request_exit()
 
-        app._agent_task.cancel.assert_not_called()
+        assert app._agent_task.cancelled()
         app.agent._extract_memories.assert_awaited_once_with(app.conversation)
+        app.client.aclose.assert_awaited_once_with()
         app.hook_engine.run_hooks.assert_awaited_once()
         app._shutdown_mcp.assert_awaited_once_with()
         app._stale_cleanup_task.cancel.assert_called_once_with()
@@ -415,6 +449,7 @@ class TestLegacyTUIExit:
         await request_exit()
 
         app.agent._extract_memories.assert_awaited_once_with(app.conversation)
+        app.client.aclose.assert_awaited_once_with()
         app.hook_engine.run_hooks.assert_awaited_once()
         app._shutdown_mcp.assert_awaited_once_with()
         app._stale_cleanup_task.cancel.assert_called_once_with()

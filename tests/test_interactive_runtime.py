@@ -127,6 +127,49 @@ async def test_build_runtime_registers_engineering_tools_and_closes_twice(
 
 
 @pytest.mark.asyncio
+async def test_close_cancels_agent_tasks_and_closes_their_private_clients(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]),
+        provider,
+        PermissionMode.DEFAULT,
+        None,
+        tmp_path,
+    )
+    started = asyncio.Event()
+    private_client = FakeClient()
+
+    class BackgroundAgent:
+        client = private_client
+        team_name = ""
+        _team_manager = None
+        total_input_tokens = 0
+        total_output_tokens = 0
+
+        async def run_to_completion(self, _task, _conversation=None):
+            started.set()
+            await asyncio.Event().wait()
+
+    task_id = runtime.task_manager.launch(BackgroundAgent(), "background")
+    await started.wait()
+    agent_task = runtime.task_manager._async_tasks[task_id]
+
+    try:
+        await runtime.close()
+
+        assert agent_task.done()
+        assert runtime.task_manager.get(task_id).status == "cancelled"
+        assert private_client.close_calls == 1
+    finally:
+        if not agent_task.done():
+            agent_task.cancel()
+            await asyncio.gather(agent_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_refresh_skills_reloads_commands_and_clears_empty_catalog(
     tmp_path: Path,
     provider: ProviderConfig,

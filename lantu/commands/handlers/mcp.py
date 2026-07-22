@@ -10,7 +10,27 @@ from lantu.commands.registry import Command, CommandContext, CommandType
 
 async def handle_mcp(ctx: CommandContext) -> None:
     app = ctx.ui
+    runtime = getattr(app, "runtime", None)
+    wait_until_ready = getattr(runtime, "wait_until_ready", None)
+    if callable(wait_until_ready):
+        await wait_until_ready()
+
+    mcp_mgr = getattr(app, "mcp_manager", None)
+    if mcp_mgr is None and runtime is not None:
+        mcp_mgr = getattr(runtime, "mcp_manager", None)
+
     info = getattr(app, "_mcp_server_info", "")
+    clients = getattr(mcp_mgr, "_clients", {}) if mcp_mgr is not None else {}
+    if not info and clients:
+        tool_count = sum(
+            1
+            for tool in ctx.agent.registry.list_tools()
+            if tool.name.startswith("mcp__")
+        )
+        info = (
+            f"Connected to {len(clients)} MCP server(s), "
+            f"{tool_count} tools registered"
+        )
     if not info:
         ctx.ui.add_system_message("No MCP servers connected")
         return
@@ -18,7 +38,6 @@ async def handle_mcp(ctx: CommandContext) -> None:
     lines = ["MCP 状态", "─────────────"]
     lines.append(info)
 
-    mcp_mgr = getattr(app, "mcp_manager", None)
     if mcp_mgr and hasattr(mcp_mgr, "_clients"):
         for name, client in mcp_mgr._clients.items():
             tool_names = [

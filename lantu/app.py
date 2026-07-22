@@ -1890,6 +1890,18 @@ class LantuApp(App):
         self._exit_requested = True
 
         async def _cleanup() -> None:
+            agent_task = self._agent_task
+            if (
+                agent_task is not None
+                and agent_task is not asyncio.current_task()
+                and not agent_task.done()
+            ):
+                agent_task.cancel()
+                try:
+                    await asyncio.wait_for(agent_task, timeout=0.5)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                    pass
+
             tasks: list[asyncio.Task] = []
 
             if self.agent and self.agent.memory_manager:
@@ -1902,6 +1914,8 @@ class LantuApp(App):
                         "shutdown", HookContext(event_name="shutdown")
                     )
                 ))
+            if self.client is not None:
+                tasks.append(asyncio.create_task(self.client.aclose()))
             tasks.append(asyncio.create_task(self._shutdown_mcp()))
 
             if tasks:

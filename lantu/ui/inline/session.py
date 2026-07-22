@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Iterable
 from html import escape
 from pathlib import Path
@@ -73,6 +74,7 @@ class InlinePromptSession:
         history_file.parent.mkdir(parents=True, exist_ok=True)
         self._chat_completer = InlineCompleter(registry, work_dir)
         self._toggle_task: Awaitable[Any] | None = None
+        self._pending_input = ""
 
         bindings = KeyBindings()
 
@@ -99,15 +101,27 @@ class InlinePromptSession:
             erase_when_done=True,
         )
 
+    def set_work_dir(self, work_dir: str) -> None:
+        self._chat_completer.work_dir = work_dir
+
     async def prompt(self, status: str) -> str:
         safe_status = escape(sanitize_terminal_text(status))
-        return await self._session.prompt_async(
-            HTML("<cyan>❯ </cyan>"),
-            bottom_toolbar=HTML(f"<dim>{safe_status}</dim>"),
-            completer=self._chat_completer,
-            complete_while_typing=True,
-            multiline=True,
-        )
+        try:
+            result = await self._session.prompt_async(
+                HTML("<cyan>❯ </cyan>"),
+                bottom_toolbar=HTML(f"<dim>{safe_status}</dim>"),
+                completer=self._chat_completer,
+                complete_while_typing=True,
+                multiline=True,
+                default=self._pending_input,
+            )
+        except asyncio.CancelledError:
+            app = getattr(self._session, "app", None)
+            buffer = getattr(app, "current_buffer", None)
+            self._pending_input = getattr(buffer, "text", self._pending_input)
+            raise
+        self._pending_input = ""
+        return result
 
     async def choose(self, label: str, choices: list[str]) -> str:
         if not choices:

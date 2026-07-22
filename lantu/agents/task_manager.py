@@ -205,3 +205,23 @@ class TaskManager:
             except asyncio.QueueEmpty:
                 break
         return completed
+
+    def has_completed(self) -> bool:
+        return not self._notify_queue.empty()
+
+    def active_tasks(self) -> set[asyncio.Task[None]]:
+        return {
+            task for task in self._async_tasks.values() if not task.done()
+        }
+
+    def agent_clients(self) -> list[Any]:
+        clients: list[Any] = []
+        seen: set[int] = set()
+        for background in self._tasks.values():
+            client = getattr(background.agent, "client", None)
+            identity = id(client)
+            if client is None or identity in seen:
+                continue
+            seen.add(identity)
+            clients.append(client)
+        return clients

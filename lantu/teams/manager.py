@@ -251,16 +251,24 @@ class TeamManager:
             pane_id = self._pane_ids.pop(member.agent_id, None)
             remaining = self._remaining_timeout(deadline, timeout)
             if pane_id and remaining > 0:
-                self._kill_pane(
-                    pane_id, member.backend_type, timeout=remaining
+                await self._run_daemon_cleanup(
+                    lambda: self._kill_pane(
+                        pane_id, member.backend_type, timeout=remaining
+                    ),
+                    remaining,
+                    f"pane cleanup for teammate '{member.name}'",
                 )
 
             remaining = self._remaining_timeout(deadline, timeout)
             if member.worktree_path and remaining > 0:
-                self._cleanup_worktree(
-                    member.worktree_path,
-                    deadline=deadline,
-                    timeout=remaining,
+                await self._run_daemon_cleanup(
+                    lambda: self._cleanup_worktree(
+                        member.worktree_path,
+                        deadline=deadline,
+                        timeout=remaining,
+                    ),
+                    remaining,
+                    f"worktree cleanup for teammate '{member.name}'",
                 )
 
             self._teammate_team_map.pop(member.agent_id, None)
@@ -378,6 +386,15 @@ class TeamManager:
             parts.append("</team-notification>")
             notes.append("\n".join(parts))
         return notes
+
+    def has_lead_notifications(self) -> bool:
+        for team_name in list(self._teams):
+            team = self.get_team(team_name)
+            mailbox = self.get_mailbox(team_name)
+            if team is not None and mailbox is not None:
+                if mailbox.read(team.lead_agent_id):
+                    return True
+        return False
 
     def get_all_teammate_progress(self) -> list[TeammateProgress]:
         """Collect progress objects attached to every registered teammate."""

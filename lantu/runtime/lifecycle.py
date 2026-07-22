@@ -280,6 +280,7 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
     current = asyncio.current_task()
 
     managed_tasks = set(runtime.background_tasks)
+    managed_tasks.update(runtime.task_manager.active_tasks())
     if runtime.mcp_task is not None:
         managed_tasks.add(runtime.mcp_task)
     managed_tasks.discard(current)
@@ -293,9 +294,15 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
     if isinstance(interrupted, asyncio.CancelledError):
         cancellation = interrupted
 
+    private_clients = [
+        client
+        for client in runtime.task_manager.agent_clients()
+        if client is not runtime.client
+    ]
     cleanup: list[Awaitable[Any]] = [
         runtime.agent._extract_memories(runtime.conversation),
         runtime.client.aclose(),
+        *(client.aclose() for client in private_clients),
     ]
     if runtime.hook_engine is not None:
         cleanup.append(

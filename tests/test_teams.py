@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import tempfile
+import threading
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -174,6 +175,63 @@ async def test_bounded_team_delete_completes_normal_external_cleanup(
 
     assert calls == ["mailbox", "directory"]
     assert team.name not in manager._teams
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_kind", ["pane", "worktree"])
+async def test_bounded_team_delete_keeps_blocking_cleanup_off_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_kind: str,
+) -> None:
+    from lantu.teams.manager import TeamManager
+
+    manager = TeamManager()
+    member = TeammateInfo(
+        name="worker",
+        agent_id="agent-1",
+        agent_type="general",
+        model="test",
+        worktree_path="/tmp/worktree" if cleanup_kind == "worktree" else "",
+        backend_type=BackendType.TMUX.value,
+        is_active=False,
+    )
+    team = AgentTeam(name="nonblocking", lead_agent_id="lead", members=[member])
+    manager._teams[team.name] = team
+    if cleanup_kind == "pane":
+        manager._pane_ids[member.agent_id] = "pane-1"
+
+    release = threading.Event()
+    started = threading.Event()
+
+    def block(*_args, **_kwargs) -> None:
+        started.set()
+        release.wait(0.5)
+
+    monkeypatch.setattr(manager, "_kill_pane", block)
+    monkeypatch.setattr(manager, "_cleanup_worktree", block)
+    monkeypatch.setattr(manager, "_remove_dir", lambda *_args, **_kwargs: None)
+    began = time.monotonic()
+    heartbeat_at: list[float] = []
+
+    async def heartbeat() -> None:
+        await asyncio.sleep(0.01)
+        heartbeat_at.append(time.monotonic() - began)
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    release_timer = threading.Timer(0.1, release.set)
+    release_timer.daemon = True
+    release_timer.start()
+    try:
+        await manager.delete_team_bounded(
+            team.name, deadline=time.monotonic() + 1
+        )
+        await heartbeat_task
+    finally:
+        release_timer.cancel()
+        release.set()
+
+    assert started.is_set()
+    assert heartbeat_at[0] < 0.08
 from lantu.tools.base import Tool, ToolResult
 
 # =====================================================================

@@ -116,6 +116,23 @@ def test_command_completion_sanitizes_external_display(tmp_path: Path) -> None:
     assert "\n" not in display
 
 
+def test_prompt_session_updates_file_completion_work_dir(tmp_path: Path) -> None:
+    original = tmp_path / "original"
+    worktree = tmp_path / "worktree"
+    original.mkdir()
+    worktree.mkdir()
+    (original / "original.py").write_text("", encoding="utf-8")
+    (worktree / "worktree.py").write_text("", encoding="utf-8")
+    facade = InlinePromptSession(
+        CommandRegistry(), str(original), str(tmp_path / "history")
+    )
+
+    facade.set_work_dir(str(worktree))
+    completions = _completions(facade._chat_completer, "@work")
+
+    assert [completion.text for completion in completions] == ["@worktree.py"]
+
+
 def test_scan_files_is_sorted_and_skips_internal_directories(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("print('ok')", encoding="utf-8")
     (tmp_path / ".git").mkdir()
@@ -551,6 +568,36 @@ async def test_inline_prompt_and_text_facade_trim_and_sanitize(
     assert calls[0]["kwargs"]["complete_while_typing"] is True
     assert calls[0]["kwargs"]["multiline"] is True
     assert calls[1]["kwargs"]["multiline"] is False
+
+
+@pytest.mark.asyncio
+async def test_cancelled_prompt_restores_draft_on_next_prompt(
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class CancelThenSubmit:
+        def __init__(self) -> None:
+            self.app = SimpleNamespace(
+                current_buffer=SimpleNamespace(text="draft message")
+            )
+
+        async def prompt_async(self, *args: Any, **kwargs: Any) -> str:
+            calls.append({"args": args, "kwargs": kwargs})
+            if len(calls) == 1:
+                raise asyncio.CancelledError
+            return "submitted"
+
+    facade = InlinePromptSession(
+        CommandRegistry(), str(tmp_path), str(tmp_path / "history")
+    )
+    facade._session = CancelThenSubmit()
+
+    with pytest.raises(asyncio.CancelledError):
+        await facade.prompt("ready")
+    assert await facade.prompt("ready") == "submitted"
+
+    assert calls[1]["kwargs"]["default"] == "draft message"
 
 
 @pytest.mark.asyncio
