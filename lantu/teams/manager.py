@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -168,7 +169,12 @@ class TeamManager:
     def get_pane_id(self, agent_id: str) -> str | None:
         return self._pane_ids.get(agent_id)
 
-    def delete_team(self, team_name: str) -> None:
+    def delete_team(
+        self,
+        team_name: str,
+        deadline: float | None = None,
+        timeout: float = 10.0,
+    ) -> None:
         team = self.get_team(team_name)
         if team is None:
             raise TeamError(f"Team '{team_name}' not found")
@@ -186,21 +192,26 @@ class TeamManager:
                 handle.cancel()
 
             pane_id = self._pane_ids.pop(member.agent_id, None)
-            if pane_id:
+            if pane_id and self._remaining_timeout(deadline, timeout) > 0:
                 self._kill_pane(pane_id, member.backend_type)
 
             if member.worktree_path:
-                self._cleanup_worktree(member.worktree_path)
+                self._cleanup_worktree(
+                    member.worktree_path, deadline=deadline, timeout=timeout
+                )
 
             if self._trace_manager:
                 self._trace_manager.remove(member.agent_id)
 
-        mailbox = self.get_mailbox(team_name)
-        if mailbox:
-            mailbox.cleanup_all()
+        if self._remaining_timeout(deadline, timeout) > 0:
+            mailbox = self.get_mailbox(team_name)
+            if mailbox:
+                mailbox.cleanup_all()
 
-        team_dir = resolve_team_dir(team_name)
-        self._remove_dir(team_dir)
+            team_dir = resolve_team_dir(team_name)
+            self._remove_dir(team_dir)
+        else:
+            log.warning("Team '%s' external cleanup skipped: deadline exhausted", team_name)
 
         self._teams.pop(team_name, None)
         self._task_stores.pop(team_name, None)
@@ -269,15 +280,32 @@ class TeamManager:
         except Exception as e:
             log.warning("Failed to kill pane %s: %s", pane_id, e)
 
-    def _cleanup_worktree(self, worktree_path: str) -> None:
+    @staticmethod
+    def _remaining_timeout(deadline: float | None, timeout: float) -> float:
+        if deadline is None:
+            return timeout
+        return max(0.0, min(timeout, deadline - time.monotonic()))
+
+    def _cleanup_worktree(
+        self,
+        worktree_path: str,
+        deadline: float | None = None,
+        timeout: float = 10.0,
+    ) -> None:
         import subprocess
+        remaining = self._remaining_timeout(deadline, timeout)
+        if remaining <= 0:
+            log.warning("Worktree cleanup skipped for %s: deadline exhausted", worktree_path)
+            return
         try:
             subprocess.run(
                 ["git", "worktree", "remove", worktree_path, "--force"],
-                capture_output=True, timeout=10,
+                capture_output=True, timeout=remaining,
             )
         except Exception as e:
             log.warning("git worktree remove failed for %s: %s", worktree_path, e)
+            if deadline is not None:
+                return
             import shutil
             try:
                 if Path(worktree_path).exists():

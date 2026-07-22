@@ -141,7 +141,11 @@ class ToolRegistry:
         return schemas
 
 
-def create_default_registry(file_cache: FileCache | None = None, file_history: Any = None) -> ToolRegistry:
+def create_default_registry(
+    file_cache: FileCache | None = None,
+    file_history: Any = None,
+    work_dir: str | None = None,
+) -> ToolRegistry:
     from lantu.tools.bash import Bash
     from lantu.tools.edit_file import EditFile
     from lantu.tools.file_state_cache import FileStateCache
@@ -159,4 +163,6 @@ def create_default_registry(file_cache: FileCache | None = None, file_history: A
     registry.register(Bash())
     registry.register(Glob())
     registry.register(Grep())
+    for tool in registry.list_tools():
+        tool.work_dir = work_dir
     return registry

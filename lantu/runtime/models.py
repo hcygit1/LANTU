@@ -69,7 +69,7 @@ class InteractiveRuntime:
         if self.mcp_task is None:
             return
         try:
-            await self.mcp_task
+            await asyncio.shield(self.mcp_task)
         except asyncio.CancelledError:
             if not self._closed:
                 raise

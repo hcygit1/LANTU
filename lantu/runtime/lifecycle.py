@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable
+from pathlib import Path
 from typing import Any
 
 from lantu.client import create_client
@@ -11,12 +13,39 @@ from lantu.conversation import ConversationManager, Message
 from lantu.hooks import HookContext
 from lantu.mcp import ConnectResult, MCPManager
 from lantu.memory import find_relevant_memories, render_reminder
+from lantu.permissions import PathSandbox
 
 from lantu.runtime.models import InteractiveRuntime
 
 log = logging.getLogger(__name__)
 
 BACKGROUND_TASK_CANCEL_TIMEOUT = 0.25
+RUNTIME_CLOSE_TIMEOUT = 3.0
+MEMORY_PREFETCH_TIMEOUT = 8.0
+
+
+def switch_runtime_work_dir(runtime: InteractiveRuntime, path: str) -> None:
+    runtime.agent.work_dir = path
+    runtime.permission_checker.sandbox = PathSandbox(path)
+    for tool in runtime.registry.list_tools():
+        tool.work_dir = path
+
+    bash_tool = runtime.registry.get("Bash")
+    if (
+        runtime.config.sandbox.enabled
+        and bash_tool is not None
+        and getattr(bash_tool, "sandbox", None) is not None
+    ):
+        from lantu.sandbox import SandboxConfig
+
+        bash_tool.sandbox_config = SandboxConfig(
+            allow_write=[path, "/tmp"],
+            deny_write=[
+                str(Path(path) / ".lantu" / "config.yaml"),
+                str(Path(path) / ".lantu" / "permissions.local.yaml"),
+            ],
+            network_enabled=runtime.config.sandbox.network_enabled,
+        )
 
 
 def _render_skill_catalog(catalog: list[tuple[str, str]]) -> str:
@@ -92,15 +121,21 @@ async def prefetch_runtime_memories(
         from lantu.tools.base import StreamEnd, TextDelta
 
         side_client = create_client(provider)
-        conversation = ConversationManager()
-        conversation.history = [Message(role="user", content=user_message)]
-        collected = ""
-        async for event in side_client.stream(conversation, system=system_prompt):
-            if isinstance(event, TextDelta):
-                collected += event.text
-            elif isinstance(event, StreamEnd):
-                continue
-        return collected
+        try:
+            conversation = ConversationManager()
+            conversation.history = [Message(role="user", content=user_message)]
+            collected = ""
+            async for event in side_client.stream(conversation, system=system_prompt):
+                if isinstance(event, TextDelta):
+                    collected += event.text
+                elif isinstance(event, StreamEnd):
+                    continue
+            return collected
+        finally:
+            try:
+                await side_client.aclose()
+            except BaseException:
+                log.warning("Failed to close memory side client", exc_info=True)
 
     try:
         results = await asyncio.wait_for(
@@ -112,7 +147,7 @@ async def prefetch_runtime_memories(
                 already_surfaced=None,
                 selector=selector,
             ),
-            timeout=8.0,
+            timeout=MEMORY_PREFETCH_TIMEOUT,
         )
         return render_reminder(results)
     except asyncio.CancelledError:
@@ -205,20 +240,22 @@ async def initialize_runtime_mcp(runtime: InteractiveRuntime) -> None:
 
 async def _run_cleanup_tasks(
     awaitables: list[Awaitable[Any]], timeout: float
-) -> None:
+) -> BaseException | None:
     tasks = [asyncio.create_task(awaitable) for awaitable in awaitables]
-    await _wait_for_tasks_bounded(tasks, timeout)
+    return await _wait_for_tasks_bounded(tasks, timeout)
 
 
 async def _wait_for_tasks_bounded(
     tasks: list[asyncio.Task[Any]] | set[asyncio.Task[Any]], timeout: float
-) -> None:
+) -> BaseException | None:
     pending = set(tasks)
     if not pending:
-        return
+        return None
+    interrupted: BaseException | None = None
     try:
         done, pending = await asyncio.wait(pending, timeout=timeout)
-    except BaseException:
+    except BaseException as exc:
+        interrupted = exc
         done = {task for task in pending if task.done()}
         pending = {task for task in pending if not task.done()}
 
@@ -227,12 +264,19 @@ async def _wait_for_tasks_bounded(
     for task in pending:
         _cancel_task_once(task)
         task.add_done_callback(_consume_task_result)
+    return interrupted
+
+
+def _remaining_time(deadline: float) -> float:
+    return max(0.0, deadline - time.monotonic())
 
 
 async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
     if runtime._closed:
         return
     runtime._closed = True
+    deadline = time.monotonic() + RUNTIME_CLOSE_TIMEOUT
+    cancellation: asyncio.CancelledError | None = None
     current = asyncio.current_task()
 
     managed_tasks = set(runtime.background_tasks)
@@ -242,12 +286,16 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
     for task in managed_tasks:
         _cancel_task_once(task)
         task.add_done_callback(runtime.background_tasks.discard)
-    await _wait_for_tasks_bounded(
-        managed_tasks, timeout=BACKGROUND_TASK_CANCEL_TIMEOUT
+    interrupted = await _wait_for_tasks_bounded(
+        managed_tasks,
+        timeout=min(BACKGROUND_TASK_CANCEL_TIMEOUT, _remaining_time(deadline)),
     )
+    if isinstance(interrupted, asyncio.CancelledError):
+        cancellation = interrupted
 
     cleanup: list[Awaitable[Any]] = [
-        runtime.agent._extract_memories(runtime.conversation)
+        runtime.agent._extract_memories(runtime.conversation),
+        runtime.client.aclose(),
     ]
     if runtime.hook_engine is not None:
         cleanup.append(
@@ -259,7 +307,11 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
     runtime.mcp_manager = None
     if manager is not None:
         cleanup.append(manager.shutdown())
-    await _run_cleanup_tasks(cleanup, timeout=3.0)
+    interrupted = await _run_cleanup_tasks(
+        cleanup, timeout=_remaining_time(deadline)
+    )
+    if isinstance(interrupted, asyncio.CancelledError):
+        cancellation = interrupted
 
     try:
         for team_name in runtime.team_manager.list_teams():
@@ -268,7 +320,7 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
                 if team is not None:
                     for member in team.members:
                         team.set_member_active(member.name, False)
-                runtime.team_manager.delete_team(team_name)
+                runtime.team_manager.delete_team(team_name, deadline=deadline)
             except BaseException:
                 log.exception("Failed to delete team %s", team_name)
     finally:
@@ -276,3 +328,5 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
             runtime.session.close()
         except BaseException:
             log.exception("Failed to close interactive session")
+    if cancellation is not None:
+        raise cancellation

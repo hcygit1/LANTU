@@ -301,3 +301,95 @@ class TestMCPManagerPartialFailure:
         assert len(result.errors) == 1
         assert "bad" in result.errors[0]
         assert registry.get("mcp_good_test_tool") is not None
+
+
+@pytest.mark.asyncio
+async def test_mcp_client_connect_cancellation_cleans_exit_stack(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lantu.mcp.client import MCPClient
+
+    client = MCPClient(MCPServerConfig(name="cancelled", command="fake"))
+    started = asyncio.Event()
+
+    async def blocked_connect():
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(client, "_connect_stdio", blocked_connect)
+    task = asyncio.create_task(client.connect())
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client._stack is None
+    assert not client.is_alive
+
+
+@pytest.mark.asyncio
+async def test_mcp_connect_preserves_cancellation_when_stack_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lantu.mcp import client as client_module
+
+    class BrokenStack:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            raise RuntimeError("stack cleanup failed")
+
+    client = client_module.MCPClient(
+        MCPServerConfig(name="cancelled", command="fake")
+    )
+    started = asyncio.Event()
+
+    async def blocked_connect():
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(client_module, "AsyncExitStack", BrokenStack)
+    monkeypatch.setattr(client, "_connect_stdio", blocked_connect)
+    task = asyncio.create_task(client.connect())
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client._stack is None
+
+
+@pytest.mark.asyncio
+async def test_mcp_manager_cancellation_closes_owned_connecting_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lantu.mcp import manager as manager_module
+
+    started = asyncio.Event()
+    instances = []
+
+    class FakeMCPClient:
+        def __init__(self, config) -> None:
+            self.config = config
+            self.closed = False
+            instances.append(self)
+
+        async def connect(self) -> None:
+            started.set()
+            await asyncio.Event().wait()
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(manager_module, "MCPClient", FakeMCPClient)
+    manager = manager_module.MCPManager()
+    manager.load_configs([MCPServerConfig(name="cancelled", command="fake")])
+    task = asyncio.create_task(manager.connect_all())
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert instances[0].closed
+    assert manager._clients == {}

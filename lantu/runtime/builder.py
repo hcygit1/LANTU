@@ -50,12 +50,13 @@ from lantu.runtime.lifecycle import (
     _render_skill_catalog,
     close_interactive_runtime,
     initialize_runtime_mcp,
+    switch_runtime_work_dir,
     track_background_task,
 )
 from lantu.runtime.models import InteractiveRuntime
 
 
-def _build_core(
+async def _build_core(
     config: AppConfig,
     provider: ProviderConfig,
     permission_mode: PermissionMode,
@@ -63,29 +64,38 @@ def _build_core(
     work_dir: Path,
 ) -> InteractiveRuntime:
     client = create_client(provider)
-    work_dir_str = str(work_dir)
-    home = Path.home()
-    checker = PermissionChecker(
-        detector=DangerousCommandDetector(),
-        sandbox=PathSandbox(work_dir_str),
-        rule_engine=RuleEngine(
-            user_rules_path=home / ".lantu" / "permissions.yaml",
-            project_rules_path=work_dir / ".lantu" / "permissions.yaml",
-            local_rules_path=work_dir / ".lantu" / "permissions.local.yaml",
-        ),
-        mode=permission_mode,
-        sandbox_enabled=config.sandbox.enabled and config.sandbox.auto_allow,
-    )
-    memory_manager = MemoryManager(work_dir_str)
-    session_manager = SessionManager(work_dir_str)
-    session_manager.cleanup()
-    session = session_manager.create()
+    try:
+        work_dir_str = str(work_dir)
+        home = Path.home()
+        checker = PermissionChecker(
+            detector=DangerousCommandDetector(),
+            sandbox=PathSandbox(work_dir_str),
+            rule_engine=RuleEngine(
+                user_rules_path=home / ".lantu" / "permissions.yaml",
+                project_rules_path=work_dir / ".lantu" / "permissions.yaml",
+                local_rules_path=work_dir / ".lantu" / "permissions.local.yaml",
+            ),
+            mode=permission_mode,
+            sandbox_enabled=config.sandbox.enabled and config.sandbox.auto_allow,
+        )
+        memory_manager = MemoryManager(work_dir_str)
+        session_manager = SessionManager(work_dir_str)
+        session_manager.cleanup()
+        session = session_manager.create()
+    except BaseException:
+        try:
+            await client.aclose()
+        except BaseException:
+            pass
+        raise
 
     try:
         file_cache = FileCache()
         file_history = FileHistory(work_dir_str, session.session_id)
         registry = create_default_registry(
-            file_cache=file_cache, file_history=file_history
+            file_cache=file_cache,
+            file_history=file_history,
+            work_dir=work_dir_str,
         )
         for tool in registry.list_tools():
             if hasattr(tool, "file_history"):
@@ -162,6 +172,10 @@ def _build_core(
         )
     except BaseException:
         session.close()
+        try:
+            await client.aclose()
+        except BaseException:
+            pass
         raise
 
 
@@ -214,12 +228,23 @@ def _register_worktree_and_agents(runtime: InteractiveRuntime) -> None:
     )
     restored = runtime.worktree_manager.restore_session()
     if restored is not None:
-        runtime.agent.work_dir = restored.worktree_path
+        switch_runtime_work_dir(runtime, restored.worktree_path)
+    switch_work_dir = lambda path: switch_runtime_work_dir(runtime, path)
     runtime.command_registry.register_sync(
-        create_worktree_command(runtime.worktree_manager)
+        create_worktree_command(
+            runtime.worktree_manager, on_work_dir_changed=switch_work_dir
+        )
     )
-    runtime.registry.register(EnterWorktreeTool(runtime.worktree_manager))
-    runtime.registry.register(ExitWorktreeTool(runtime.worktree_manager))
+    runtime.registry.register(
+        EnterWorktreeTool(
+            runtime.worktree_manager, on_work_dir_changed=switch_work_dir
+        )
+    )
+    runtime.registry.register(
+        ExitWorktreeTool(
+            runtime.worktree_manager, on_work_dir_changed=switch_work_dir
+        )
+    )
 
     runtime.agent_loader = AgentLoader(
         work_dir_str, enable_verification=config.enable_verification_agent
@@ -266,6 +291,7 @@ def _register_worktree_and_agents(runtime: InteractiveRuntime) -> None:
     )
     runtime.agent._team_manager = runtime.team_manager
     runtime.agent.notification_fn = runtime.team_manager.drain_lead_mailbox
+    switch_runtime_work_dir(runtime, runtime.agent.work_dir)
 
 
 async def _start_runtime_services(runtime: InteractiveRuntime) -> None:
@@ -302,7 +328,7 @@ async def build_interactive_runtime(
     hook_engine: HookEngine | None,
     work_dir: str | Path,
 ) -> InteractiveRuntime:
-    runtime = _build_core(
+    runtime = await _build_core(
         config, provider, permission_mode, hook_engine, Path(work_dir).resolve()
     )
     try:

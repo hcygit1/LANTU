@@ -20,7 +20,7 @@ from lantu.config import WorktreeConfig, load_config
 from lantu.worktree.changes import count_worktree_changes, has_worktree_changes
 from lantu.worktree.integration import build_worktree_notice, generate_worktree_name
 from lantu.worktree.manager import WorktreeError, WorktreeManager
-from lantu.worktree.models import WorktreeSession
+from lantu.worktree.models import Worktree, WorktreeSession
 from lantu.worktree.session import load_worktree_session, save_worktree_session
 from lantu.worktree.slug import flatten_slug, validate_slug
 
@@ -326,6 +326,32 @@ class TestWorktreeManager:
     async def test_enter_nonexistent(self, manager):
         with pytest.raises(WorktreeError, match="not found"):
             await manager.enter("nope")
+
+    @pytest.mark.asyncio
+    async def test_enter_uses_repo_root_as_original_cwd(
+        self, tmp_path, monkeypatch
+    ):
+        repo_root = tmp_path / "repo"
+        process_cwd = tmp_path / "process"
+        worktree_path = tmp_path / "worktree"
+        repo_root.mkdir()
+        process_cwd.mkdir()
+        worktree_path.mkdir()
+        manager = WorktreeManager(str(repo_root))
+        manager.active["feature"] = Worktree(
+            name="feature",
+            path=str(worktree_path),
+            branch="worktree-feature",
+            based_on="HEAD",
+            head_commit="abc",
+        )
+        monkeypatch.chdir(process_cwd)
+        monkeypatch.setattr(manager, "_get_current_branch", lambda: "main")
+        monkeypatch.setattr(manager, "_get_head_commit", lambda: "abc")
+
+        session = await manager.enter("feature")
+
+        assert session.original_cwd == str(repo_root)
 
 # =========================================================================
 # F. 变更检测与自动清理

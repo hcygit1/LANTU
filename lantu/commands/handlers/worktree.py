@@ -4,7 +4,7 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from lantu.commands.registry import Command, CommandContext, CommandType
 
@@ -12,7 +12,10 @@ if TYPE_CHECKING:
     from lantu.worktree.manager import WorktreeManager
 
 
-def create_worktree_command(manager: WorktreeManager) -> Command:
+def create_worktree_command(
+    manager: WorktreeManager,
+    on_work_dir_changed: Callable[[str], None] | None = None,
+) -> Command:
 
 
     async def handle_worktree(ctx: CommandContext) -> None:
@@ -33,13 +36,13 @@ def create_worktree_command(manager: WorktreeManager) -> Command:
         rest = parts[1:]
 
         if sub == "create":
-            await _handle_create(ctx, manager, rest)
+            await _handle_create(ctx, manager, rest, on_work_dir_changed)
         elif sub == "list":
             _handle_list(ctx, manager)
         elif sub == "enter":
-            await _handle_enter(ctx, manager, rest)
+            await _handle_enter(ctx, manager, rest, on_work_dir_changed)
         elif sub == "exit":
-            await _handle_exit(ctx, manager, rest)
+            await _handle_exit(ctx, manager, rest, on_work_dir_changed)
         elif sub == "status":
             _handle_status(ctx, manager)
         else:
@@ -59,6 +62,7 @@ async def _handle_create(
     ctx: CommandContext,
     manager: WorktreeManager,
     args: list[str],
+    on_work_dir_changed: Callable[[str], None] | None = None,
 ) -> None:
     if not args:
         ctx.ui.add_system_message("用法: /worktree create <name> [base-branch]")
@@ -77,6 +81,8 @@ async def _handle_create(
         session = await manager.enter(name)
         if ctx.agent:
             ctx.agent.work_dir = wt.path
+        if on_work_dir_changed is not None:
+            on_work_dir_changed(session.worktree_path)
     except Exception as e:
         ctx.ui.add_system_message(
             f"Worktree 已创建但进入失败: {e}\n路径: {wt.path}"
@@ -114,6 +120,7 @@ async def _handle_enter(
     ctx: CommandContext,
     manager: WorktreeManager,
     args: list[str],
+    on_work_dir_changed: Callable[[str], None] | None = None,
 ) -> None:
     if not args:
         ctx.ui.add_system_message("用法: /worktree enter <name>")
@@ -124,6 +131,8 @@ async def _handle_enter(
         session = await manager.enter(name)
         if ctx.agent:
             ctx.agent.work_dir = session.worktree_path
+        if on_work_dir_changed is not None:
+            on_work_dir_changed(session.worktree_path)
         ctx.ui.add_system_message(f"已进入 worktree: {name}\n路径: {session.worktree_path}")
     except Exception as e:
         ctx.ui.add_system_message(f"进入 worktree 失败: {e}")
@@ -133,6 +142,7 @@ async def _handle_exit(
     ctx: CommandContext,
     manager: WorktreeManager,
     args: list[str],
+    on_work_dir_changed: Callable[[str], None] | None = None,
 ) -> None:
     session = manager.get_current_session()
     if session is None:
@@ -147,6 +157,8 @@ async def _handle_exit(
         await manager.exit(session.worktree_name, action=action, discard_changes=discard)
         if ctx.agent:
             ctx.agent.work_dir = session.original_cwd
+        if on_work_dir_changed is not None:
+            on_work_dir_changed(session.original_cwd)
         msg = f"已退出 worktree: {session.worktree_name}"
         if remove:
             msg += "（已删除）"

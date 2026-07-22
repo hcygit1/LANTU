@@ -4,6 +4,7 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
@@ -52,10 +53,10 @@ class MCPManager:
         """
         result = ConnectResult()
         for name, config in self._configs.items():
+            client = MCPClient(config)
+            self._clients[name] = client
             try:
-                client = MCPClient(config)
                 await client.connect()
-                self._clients[name] = client
 
                 # 从 InitializeResult 提取 instructions
                 info = ServerInfo(name=name, instructions=client.instructions)
@@ -67,12 +68,25 @@ class MCPManager:
                     result.tools.append(wrapper)
                     logger.info("Registered MCP tool: %s", wrapper.name)
 
+            except asyncio.CancelledError:
+                await self._discard_client(name, client)
+                raise
             except Exception as e:
+                await self._discard_client(name, client)
                 msg = f"MCP server '{name}': {e}"
                 logger.warning(msg)
                 result.errors.append(msg)
 
         return result
+
+    async def _discard_client(self, name: str, client: MCPClient) -> None:
+        try:
+            await client.close()
+        except BaseException:
+            logger.debug("Error closing MCP client '%s'", name, exc_info=True)
+        finally:
+            if self._clients.get(name) is client:
+                self._clients.pop(name, None)
 
     async def register_all_tools(self, registry: ToolRegistry) -> ConnectResult:
         """连接所有服务器并注册工具到 registry，返回 ConnectResult。

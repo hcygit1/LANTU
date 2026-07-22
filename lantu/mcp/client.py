@@ -63,8 +63,15 @@ class MCPClient:
             self._session = session
             self._alive = True
             logger.info("MCP server '%s' connected", self.name)
-        except Exception:
-            await self._cleanup_stack()
+        except BaseException:
+            try:
+                await self._cleanup_stack()
+            except BaseException:
+                logger.debug(
+                    "Error cleaning failed connection for '%s'",
+                    self.name,
+                    exc_info=True,
+                )
             raise
 
 
@@ -123,8 +130,10 @@ class MCPClient:
 
     async def _cleanup_stack(self) -> None:
         if self._stack is not None:
+            stack = self._stack
+            self._stack = None
             try:
-                await self._stack.__aexit__(None, None, None)
+                await stack.__aexit__(None, None, None)
             except RuntimeError as e:
                 if "cancel scope" in str(e):
                     logger.debug("Cancel scope cleanup (expected during shutdown): %s", e)
@@ -132,4 +141,3 @@ class MCPClient:
                     raise
             except Exception:
                 logger.debug("Error closing stack for '%s'", self.name, exc_info=True)
-            self._stack = None

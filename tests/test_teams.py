@@ -43,6 +43,26 @@ from lantu.agents.tool_filter import (
     apply_coordinator_filter,
 )
 from lantu.tools import ToolRegistry
+
+
+def test_team_cleanup_limits_git_timeout_to_deadline(monkeypatch) -> None:
+    from lantu.teams.manager import TeamError, TeamManager
+
+    manager = TeamManager()
+    timeouts: list[float] = []
+
+    def fake_run(*_args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return MagicMock(returncode=0)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    deadline = time.monotonic() + 0.05
+
+    manager._cleanup_worktree("/tmp/fake-worktree", deadline=deadline, timeout=10)
+
+    assert 0 < timeouts[0] <= 0.05
+    with pytest.raises(TeamError):
+        manager.delete_team("missing", deadline=deadline, timeout=10)
 from lantu.tools.base import Tool, ToolResult
 
 # =====================================================================

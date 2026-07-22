@@ -60,6 +60,7 @@ class CommandRegistry:
         self._commands: dict[str, Command] = {}
         self._alias_map: dict[str, str] = {}
         self._lock = asyncio.Lock()
+        self._skill_command_names: set[str] = set()
 
     async def register(self, command: Command) -> None:
         async with self._lock:
@@ -102,3 +103,17 @@ class CommandRegistry:
 
     def list_commands(self) -> list[Command]:
         return [cmd for cmd in self._commands.values() if not cmd.hidden]
+
+    def clear_skill_commands(self) -> None:
+        for name in self._skill_command_names:
+            self._commands.pop(name, None)
+        self._alias_map = {
+            alias: name
+            for alias, name in self._alias_map.items()
+            if name not in self._skill_command_names
+        }
+        self._skill_command_names.clear()
+
+    def register_skill_command(self, command: Command) -> None:
+        self.register_sync(command)
+        self._skill_command_names.add(command.name)

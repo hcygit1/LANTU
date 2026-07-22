@@ -4,6 +4,7 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
+import inspect
 import json
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
@@ -115,6 +116,20 @@ class LLMClient(ABC):
 
     def set_max_output_tokens(self, tokens: int) -> None:
         pass
+
+    async def aclose(self) -> None:
+        if getattr(self, "_lantu_client_closed", False):
+            return
+        self._lantu_client_closed = True
+        client = getattr(self, "_client", None)
+        if client is None:
+            return
+        close = getattr(client, "aclose", None) or getattr(client, "close", None)
+        if close is None:
+            return
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
 
 def _supports_adaptive_thinking(model: str) -> bool:

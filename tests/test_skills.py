@@ -385,3 +385,23 @@ class TestAgentSkillIntegration:
 
         real_agent.clear_active_skills()
         assert len(real_agent.active_skills) == 0
+
+
+def test_skill_command_registration_is_isolated_per_registry() -> None:
+    from lantu.commands.handlers.skill_register import register_skill_commands
+    from lantu.commands.registry import CommandRegistry
+
+    alpha_loader = MagicMock()
+    alpha_loader.get_catalog.return_value = [("alpha", "Alpha skill")]
+    beta_loader = MagicMock()
+    beta_loader.get_catalog.return_value = [("beta", "Beta skill")]
+    alpha_registry = CommandRegistry()
+    beta_registry = CommandRegistry()
+
+    register_skill_commands(alpha_registry, alpha_loader)
+    register_skill_commands(beta_registry, beta_loader)
+    alpha_loader.get_catalog.return_value = []
+    register_skill_commands(alpha_registry, alpha_loader)
+
+    assert alpha_registry.find("alpha") is None
+    assert beta_registry.find("beta") is not None

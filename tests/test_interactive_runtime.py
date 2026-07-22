@@ -13,21 +13,36 @@ import pytest
 
 from lantu.client import LLMClient
 from lantu.config import AppConfig, MCPServerConfig, ProviderConfig
+from lantu.commands.handlers.worktree import create_worktree_command
+from lantu.commands.registry import CommandContext
 from lantu.mcp import ConnectResult, ServerInfo
 from lantu.permissions import PermissionMode
 from lantu.runtime import build_interactive_runtime
 from lantu.runtime import builder as runtime_builder
 from lantu.runtime import lifecycle
+from lantu.tools import create_default_registry
 from lantu.tools.base import StreamEnd, StreamEvent, TextDelta
+from lantu.tools.edit_file import Params as EditFileParams
+from lantu.tools.enter_worktree import EnterWorktreeParams, EnterWorktreeTool
+from lantu.tools.exit_worktree import ExitWorktreeParams, ExitWorktreeTool
+from lantu.tools.glob import Params as GlobParams
+from lantu.tools.grep import Params as GrepParams
+from lantu.tools.read_file import Params as ReadFileParams
+from lantu.tools.write_file import Params as WriteFileParams
+from lantu.worktree.models import WorktreeSession
 
 
 class FakeClient(LLMClient):
     def __init__(self, events: list[StreamEvent] | None = None) -> None:
         self.events = events or [StreamEnd(stop_reason="end_turn")]
+        self.close_calls = 0
 
     async def stream(self, conversation, system="", tools=None) -> AsyncIterator[StreamEvent]:
         for event in self.events:
             yield event
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
 
 
 @pytest.fixture
@@ -98,6 +113,7 @@ async def test_build_runtime_registers_engineering_tools_and_closes_twice(
 
     assert sleeper.cancelled()
     assert runtime.session._file.closed
+    assert offline_builder.close_calls == 1
 
 
 @pytest.mark.asyncio
@@ -149,6 +165,7 @@ async def test_prefetch_memories_uses_fresh_client_and_renders_result(
     monkeypatch.setattr(lifecycle, "render_reminder", lambda results: f"rendered:{results[0]}")
 
     assert await runtime.prefetch_relevant_memories("query") == "rendered:memory-result"
+    assert side_client.close_calls == 1
     await runtime.close()
 
 
@@ -320,7 +337,8 @@ async def test_close_still_closes_session_when_close_task_is_cancelled(
     close_task.cancel()
 
     try:
-        await close_task
+        with pytest.raises(asyncio.CancelledError):
+            await close_task
         assert runtime.session._file.closed
         assert not background.done()
     finally:
@@ -445,6 +463,47 @@ async def test_close_does_not_wait_for_stubborn_background_task(
 
 
 @pytest.mark.asyncio
+async def test_close_uses_one_total_deadline_for_all_async_cleanup(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+    release = asyncio.Event()
+    cleanup_tasks: list[asyncio.Task[None]] = []
+
+    async def stubborn() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        cleanup_tasks.append(task)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    background = asyncio.create_task(stubborn())
+    runtime.background_tasks.add(background)
+    await asyncio.sleep(0)
+    monkeypatch.setattr(runtime.agent, "_extract_memories", lambda _conv: stubborn())
+    monkeypatch.setattr(lifecycle, "RUNTIME_CLOSE_TIMEOUT", 0.05, raising=False)
+    monkeypatch.setattr(lifecycle, "BACKGROUND_TASK_CANCEL_TIMEOUT", 0.04)
+    started = time.monotonic()
+
+    await asyncio.wait_for(runtime.close(), timeout=0.2)
+
+    try:
+        assert time.monotonic() - started < 0.12
+        assert runtime.session._file.closed
+        assert any(not task.done() for task in cleanup_tasks)
+    finally:
+        release.set()
+        await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_partial_build_failure_closes_created_session(
     tmp_path: Path,
     provider: ProviderConfig,
@@ -476,6 +535,130 @@ async def test_partial_build_failure_closes_created_session(
         )
 
     assert created_sessions[0]._file.closed
+    assert offline_builder.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_core_build_failure_closes_created_client(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_builder.SessionManager,
+        "cleanup",
+        lambda _self: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await build_interactive_runtime(
+            AppConfig(providers=[provider]),
+            provider,
+            PermissionMode.DEFAULT,
+            None,
+            tmp_path,
+        )
+
+    assert offline_builder.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_does_not_cancel_shared_mcp_task(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+    release = asyncio.Event()
+    runtime.mcp_task = asyncio.create_task(release.wait())
+    first = asyncio.create_task(runtime.wait_until_ready())
+    second = asyncio.create_task(runtime.wait_until_ready())
+    await asyncio.sleep(0)
+    first.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert not runtime.mcp_task.done()
+    release.set()
+    await second
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["error", "timeout"])
+async def test_prefetch_closes_side_client_on_failure(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: str,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+
+    class FailingSideClient(FakeClient):
+        async def stream(self, *_args, **_kwargs):
+            if outcome == "timeout":
+                await asyncio.Event().wait()
+            raise RuntimeError("side query failed")
+            yield StreamEnd("end_turn")
+
+    side_client = FailingSideClient()
+    monkeypatch.setattr(lifecycle, "create_client", lambda _provider: side_client)
+
+    async def find_memories(**kwargs):
+        await kwargs["selector"]("system", "query")
+
+    monkeypatch.setattr(lifecycle, "find_relevant_memories", find_memories)
+    if outcome == "timeout":
+        monkeypatch.setattr(
+            lifecycle, "MEMORY_PREFETCH_TIMEOUT", 0.01, raising=False
+        )
+
+    assert await asyncio.wait_for(
+        runtime.prefetch_relevant_memories("query"), timeout=0.2
+    ) == ""
+    assert side_client.close_calls == 1
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_prefetch_closes_side_client_on_cancellation(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+    started = asyncio.Event()
+
+    class BlockingSideClient(FakeClient):
+        async def stream(self, *_args, **_kwargs):
+            started.set()
+            await asyncio.Event().wait()
+            yield StreamEnd("end_turn")
+
+    side_client = BlockingSideClient()
+    monkeypatch.setattr(lifecycle, "create_client", lambda _provider: side_client)
+
+    async def find_memories(**kwargs):
+        await kwargs["selector"]("system", "query")
+
+    monkeypatch.setattr(lifecycle, "find_relevant_memories", find_memories)
+    task = asyncio.create_task(runtime.prefetch_relevant_memories("query"))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert side_client.close_calls == 1
+    await runtime.close()
 
 
 def test_importing_runtime_does_not_load_textual() -> None:
@@ -493,3 +676,172 @@ def test_importing_runtime_does_not_load_textual() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_default_file_tools_resolve_relative_paths_from_work_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    process_dir = tmp_path / "process"
+    runtime_dir = tmp_path / "runtime"
+    process_dir.mkdir()
+    runtime_dir.mkdir()
+    tracked: list[str] = []
+    history = SimpleNamespace(track_edit=tracked.append)
+    registry = create_default_registry(
+        file_history=history, work_dir=str(runtime_dir)
+    )
+    monkeypatch.chdir(process_dir)
+
+    write_result = await registry.get("WriteFile").execute(
+        WriteFileParams(file_path="nested/example.txt", content="alpha")
+    )
+    read_result = await registry.get("ReadFile").execute(
+        ReadFileParams(file_path="nested/example.txt")
+    )
+    edit_result = await registry.get("EditFile").execute(
+        EditFileParams(
+            file_path="nested/example.txt", old_string="alpha", new_string="beta"
+        )
+    )
+    glob_result = await registry.get("Glob").execute(
+        GlobParams(pattern="**/*.txt")
+    )
+    grep_result = await registry.get("Grep").execute(
+        GrepParams(pattern="beta")
+    )
+
+    resolved = str((runtime_dir / "nested" / "example.txt").resolve())
+    assert not write_result.is_error
+    assert "alpha" in read_result.output
+    assert not edit_result.is_error
+    assert (runtime_dir / "nested" / "example.txt").read_text() == "beta"
+    assert "nested/example.txt" in glob_result.output
+    assert "nested/example.txt:1:beta" in grep_result.output
+    assert tracked == [resolved, resolved]
+    assert not (process_dir / "nested" / "example.txt").exists()
+
+
+@pytest.mark.asyncio
+async def test_restored_worktree_switches_all_runtime_path_owners(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    restored_dir = tmp_path / "restored"
+    restored_dir.mkdir()
+    restored = WorktreeSession(
+        original_cwd=str(tmp_path),
+        worktree_path=str(restored_dir),
+        worktree_name="restored",
+        original_branch="main",
+        original_head_commit="abc",
+    )
+    monkeypatch.setattr(
+        runtime_builder.WorktreeManager, "restore_session", lambda _self: restored
+    )
+
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+
+    assert runtime.agent.work_dir == str(restored_dir)
+    assert runtime.permission_checker.sandbox.project_root == restored_dir.resolve()
+    assert runtime.registry.get("Bash").work_dir == str(restored_dir)
+    assert all(
+        tool.work_dir == str(restored_dir)
+        for tool in runtime.registry.list_tools()
+    )
+    await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_worktree_tools_call_directory_switch_callback(tmp_path: Path) -> None:
+    worktree_dir = tmp_path / "worktree"
+    session = WorktreeSession(
+        original_cwd=str(tmp_path),
+        worktree_path=str(worktree_dir),
+        worktree_name="feature",
+        original_branch="main",
+        original_head_commit="abc",
+    )
+
+    class Manager:
+        current = None
+
+        def get_current_session(self):
+            return self.current
+
+        async def create(self, _name):
+            return SimpleNamespace(path=str(worktree_dir), branch="feature")
+
+        async def enter(self, _name):
+            self.current = session
+            return session
+
+        async def exit(self, *_args, **_kwargs):
+            self.current = None
+
+    manager = Manager()
+    switched: list[str] = []
+    enter = EnterWorktreeTool(manager, on_work_dir_changed=switched.append)
+    exit_tool = ExitWorktreeTool(manager, on_work_dir_changed=switched.append)
+
+    await enter.execute(EnterWorktreeParams(name="feature"))
+    await exit_tool.execute(ExitWorktreeParams(action="keep"))
+
+    assert switched == [str(worktree_dir), str(tmp_path)]
+
+
+@pytest.mark.asyncio
+async def test_worktree_command_calls_directory_switch_callback(tmp_path: Path) -> None:
+    worktree_dir = tmp_path / "worktree"
+    session = WorktreeSession(
+        original_cwd=str(tmp_path),
+        worktree_path=str(worktree_dir),
+        worktree_name="feature",
+        original_branch="main",
+        original_head_commit="abc",
+    )
+
+    class Manager:
+        current_session = None
+
+        async def create(self, _name, _base):
+            return SimpleNamespace(path=str(worktree_dir), branch="feature")
+
+        async def enter(self, _name):
+            self.current_session = session
+            return session
+
+        async def exit(self, *_args, **_kwargs):
+            self.current_session = None
+
+        def get_current_session(self):
+            return self.current_session
+
+    class UI:
+        def add_system_message(self, _message):
+            return None
+
+    manager = Manager()
+    switched: list[str] = []
+    command = create_worktree_command(
+        manager, on_work_dir_changed=switched.append
+    )
+    context = CommandContext(
+        args="create feature",
+        agent=SimpleNamespace(work_dir=str(tmp_path)),
+        conversation=None,
+        session=None,
+        session_manager=None,
+        memory_manager=None,
+        ui=UI(),
+        config={},
+    )
+    await command.handler(context)
+    context.args = "exit"
+    await command.handler(context)
+
+    assert switched == [str(worktree_dir), str(tmp_path)]

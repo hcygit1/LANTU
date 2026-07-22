@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel
@@ -31,6 +32,7 @@ class Tool(ABC):
     is_concurrency_safe: bool = False
     is_system_tool: bool = False
     should_defer: bool = False
+    work_dir: str | None = None
 
     @property
     def is_read_only(self) -> bool:
@@ -45,6 +47,12 @@ class Tool(ABC):
             "description": self.description,
             "input_schema": schema,
         }
+
+    def resolve_path(self, value: str) -> Path:
+        path = Path(value)
+        if path.is_absolute() or self.work_dir is None:
+            return path
+        return Path(self.work_dir) / path
 
     @abstractmethod
     async def execute(self, params: BaseModel) -> ToolResult: ...
