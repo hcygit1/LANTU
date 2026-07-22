@@ -90,3 +90,47 @@ def test_header_has_ascii_fallback():
 
     assert "LANTU 0.2.0" in text
     assert "█" not in text
+    assert text.isascii()
+
+
+def test_header_ascii_fallback_escapes_unicode_dynamic_fields():
+    text = render_text(
+        render_header(
+            "模型",
+            "默认",
+            "/tmp/项目",
+            version="版本",
+            unicode=False,
+        )
+    )
+
+    assert text.isascii()
+
+
+def test_header_sanitizes_csi_and_osc_sequences():
+    text = render_text(
+        render_header(
+            "deep\x1b[2Jseek",
+            "def\x1b]0;owned\x07ault",
+            "/tmp/pro\x9b2Jject",
+            version="0.2.0\x00",
+        )
+    )
+
+    assert "\x1b" not in text
+    assert "\x07" not in text
+    assert "\x9b" not in text
+    assert "\x00" not in text
+
+
+def test_header_dynamic_fields_cannot_inject_extra_lines():
+    text = render_text(
+        render_header(
+            "deepseek\nFORGED-MODEL",
+            "default\rFORGED-MODE",
+            "/tmp/project\nFORGED-PATH",
+            version="0.2.0\nFORGED-VERSION",
+        )
+    )
+
+    assert len(text.splitlines()) == 4

@@ -9,12 +9,21 @@ def package_version() -> str:
         return "0.0.0"
 
 
+def sanitize_terminal_text(value: str) -> str:
+    return "".join(
+        " " if ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F else character
+        for character in value
+    )
+
+
 def shorten_home(path: str) -> str:
-    value = str(Path(path).expanduser())
-    home = str(Path.home())
-    if value == home or value.startswith(home + "/"):
-        return "~" + value[len(home) :]
-    return value
+    value = Path(path).expanduser()
+    home = Path.home()
+    try:
+        relative = value.relative_to(home)
+    except ValueError:
+        return str(value)
+    return "~" if relative == Path() else str(Path("~") / relative)
 
 
 def format_tokens(used: int, limit: int) -> str:

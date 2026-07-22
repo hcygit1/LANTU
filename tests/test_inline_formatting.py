@@ -1,4 +1,5 @@
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -21,11 +22,38 @@ def test_package_version_falls_back_when_distribution_is_missing(monkeypatch):
 
 
 def test_shorten_home_replaces_home_prefix(monkeypatch):
-    monkeypatch.setenv("HOME", "/Users/demo")
+    monkeypatch.setattr(
+        formatting.Path,
+        "home",
+        classmethod(lambda cls: Path("/Users/demo")),
+    )
 
     assert shorten_home("/Users/demo/work/repo") == "~/work/repo"
     assert shorten_home("/Users/demo") == "~"
     assert shorten_home("/Users/demonstration/repo") == "/Users/demonstration/repo"
+
+
+def test_shorten_home_uses_path_separator_semantics(monkeypatch):
+    class TestWindowsPath(PureWindowsPath):
+        @classmethod
+        def home(cls):
+            return cls("C:/Users/demo")
+
+        def expanduser(self):
+            return self
+
+    monkeypatch.setattr(formatting, "Path", TestWindowsPath)
+
+    assert shorten_home(r"C:\Users\demo\work\repo") == r"~\work\repo"
+
+
+def test_sanitize_terminal_text_replaces_c0_and_c1_controls():
+    controls = "".join(
+        chr(code) for code in (*range(0x20), *range(0x7F, 0xA0))
+    )
+    value = f"safe{controls}text"
+
+    assert formatting.sanitize_terminal_text(value) == f"safe{' ' * len(controls)}text"
 
 
 @pytest.mark.parametrize(
