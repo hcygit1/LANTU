@@ -240,6 +240,9 @@ class InlineApp:
                 finished = True
             if self._turn_cancel_requested:
                 self._turn_cancel_requested = False
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling() > 0:
+                    current_task.uncancel()
                 self.transcript.system_message("Operation cancelled")
             else:
                 external_cancel = True
@@ -267,12 +270,33 @@ class InlineApp:
     ) -> None:
         if prefetch_task is None:
             return
-        if not self.agent._memory_recall_consumed and not prefetch_task.done():
-            prefetch_task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
-            await prefetch_task
-        if self.agent.memory_recall_task is prefetch_task:
-            self.agent.memory_recall_task = None
+        current_task = asyncio.current_task()
+        caller_cancelled = (
+            current_task is not None and current_task.cancelling() > 0
+        )
+        cancelled_by_cleanup = False
+        try:
+            if not prefetch_task.done() and (
+                caller_cancelled or not self.agent._memory_recall_consumed
+            ):
+                cancelled_by_cleanup = prefetch_task.cancel()
+
+            try:
+                await asyncio.shield(prefetch_task)
+            except asyncio.CancelledError:
+                if current_task is not None and current_task.cancelling() > 0:
+                    if not prefetch_task.done():
+                        prefetch_task.cancel()
+                    with suppress(asyncio.CancelledError, Exception):
+                        await prefetch_task
+                    raise
+                if not cancelled_by_cleanup and not prefetch_task.cancelled():
+                    raise
+            except Exception:
+                pass
+        finally:
+            if self.agent.memory_recall_task is prefetch_task:
+                self.agent.memory_recall_task = None
 
     def persist_unseen_messages(self, seen_messages: dict[int, Message]) -> None:
         for message in self.runtime.conversation.history:

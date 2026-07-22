@@ -370,6 +370,112 @@ async def test_external_run_cancellation_propagates_and_closes_runtime(
     assert runtime.closed is True
 
 
+@pytest.mark.asyncio
+async def test_external_cancellation_during_prefetch_cleanup_propagates(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    prefetch_started = asyncio.Event()
+    agent_finished = asyncio.Event()
+    prefetch_tasks: list[asyncio.Task[str]] = []
+
+    async def blocking_prefetch(query: str) -> str:
+        task = asyncio.current_task()
+        assert task is not None
+        prefetch_tasks.append(task)
+        prefetch_started.set()
+        await asyncio.Event().wait()
+        return ""
+
+    async def completed_agent(conversation: ConversationManager):
+        await prefetch_started.wait()
+        runtime.agent._memory_recall_consumed = True
+        yield LoopComplete(1)
+        agent_finished.set()
+
+    runtime.prefetch_relevant_memories = blocking_prefetch  # type: ignore[method-assign]
+    runtime.agent.run = completed_agent  # type: ignore[method-assign]
+    app = make_app(runtime)
+    turn = asyncio.create_task(app.run_prompt_interruptible("prefetch"))
+    await agent_finished.wait()
+    await asyncio.sleep(0)
+
+    turn.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await turn
+    for prefetch_task in prefetch_tasks:
+        if not prefetch_task.done():
+            prefetch_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await prefetch_task
+
+
+@pytest.mark.asyncio
+async def test_local_interrupt_cleans_blocked_prefetch_and_returns_to_input(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    prefetch_started = asyncio.Event()
+    prefetch_cancelled = asyncio.Event()
+
+    async def blocking_prefetch(query: str) -> str:
+        prefetch_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            prefetch_cancelled.set()
+        return ""
+
+    async def slow_agent(conversation: ConversationManager):
+        await prefetch_started.wait()
+        await asyncio.Event().wait()
+        yield
+
+    runtime.prefetch_relevant_memories = blocking_prefetch  # type: ignore[method-assign]
+    runtime.agent.run = slow_agent  # type: ignore[method-assign]
+    app = make_app(runtime)
+    turn = asyncio.create_task(app.run_prompt_interruptible("local"))
+    await prefetch_started.wait()
+
+    app.interrupt_active_turn()
+    await turn
+
+    assert app.running is True
+    assert prefetch_cancelled.is_set()
+    assert runtime.agent.memory_recall_task is None
+
+
+@pytest.mark.asyncio
+async def test_normal_turn_cancels_unconsumed_prefetch_without_leak(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    prefetch_started = asyncio.Event()
+    prefetch_cancelled = asyncio.Event()
+
+    async def blocking_prefetch(query: str) -> str:
+        prefetch_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            prefetch_cancelled.set()
+        return ""
+
+    async def completed_agent(conversation: ConversationManager):
+        await prefetch_started.wait()
+        yield LoopComplete(1)
+
+    runtime.prefetch_relevant_memories = blocking_prefetch  # type: ignore[method-assign]
+    runtime.agent.run = completed_agent  # type: ignore[method-assign]
+    app = make_app(runtime)
+
+    await app.run_prompt("normal")
+
+    assert prefetch_cancelled.is_set()
+    assert runtime.agent.memory_recall_task is None
+
+
 def test_interaction_renderables_are_sanitized_and_have_explicit_labels() -> None:
     from lantu.ui.inline.components.interaction import (
         render_permission_request,
