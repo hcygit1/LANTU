@@ -30,7 +30,7 @@ providers:
 export DEEPSEEK_API_KEY="your-api-key"
 ```
 
-如需为单个项目调整配置，直接创建项目目录下的 `.lantu/config.yaml`；项目级配置会覆盖全局配置中的对应设置，不需要复制 `.lantu/config.yaml.example`。
+如需为单个项目调整配置，可创建项目目录下的 `.lantu/config.yaml`。每个配置文件都必须是完整、合法的配置并包含 `providers`；项目层的 `providers` 会整体替换全局 `providers`，其他支持项按现有合并规则叠加。不要求复制 `.lantu/config.yaml.example`。
 
 ## 安装与运行
 
@@ -47,13 +47,13 @@ uv run lantu
 uv run lantu --tui
 ```
 
-也可以把当前仓库以可编辑方式安装为全局工具：
+也可以在仓库根目录把 Lantu 以可编辑方式安装为全局工具：
 
 ```bash
-uv tool install --editable /Users/hcy/Desktop/file/mewcode-python
+uv tool install --editable .
 ```
 
-安装后可在任意项目目录执行 `lantu`。执行命令时所在的目录就是 Agent 的工作目录，项目级 `.lantu/config.yaml` 也从该目录读取。
+从其他目录安装时，也可以传入通用仓库路径，例如 `uv tool install --editable /path/to/lantu`。安装后可在任意项目目录执行 `lantu`。执行命令时所在的目录就是 Agent 的工作目录，项目级 `.lantu/config.yaml` 也从该目录读取。
 
 ## 使用方式
 
