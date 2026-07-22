@@ -356,6 +356,70 @@ class TestExitHandler:
 
         assert ui.messages == ["当前前端不支持 /exit"]
 
+
+class TestLegacyTUIExit:
+    @staticmethod
+    def _make_streaming_app() -> Any:
+        from lantu.app import LantuApp
+
+        app = LantuApp([])
+        app._streaming = True
+        app._agent_task = MagicMock()
+        app._agent_task.done.return_value = False
+        app._show_system_message = MagicMock()
+        app._finish_streaming = MagicMock()
+
+        app.agent = MagicMock()
+        app.agent.memory_manager = object()
+        app.agent._extract_memories = AsyncMock()
+        app.hook_engine = MagicMock()
+        app.hook_engine.run_hooks = AsyncMock()
+        app._shutdown_mcp = AsyncMock()
+        app._stale_cleanup_task = MagicMock()
+        app._stale_cleanup_task.done.return_value = False
+
+        member = MagicMock()
+        member.name = "worker"
+        team = MagicMock()
+        team.members = [member]
+        app.team_manager = MagicMock()
+        app.team_manager._teams = {"team": team}
+        app.session = MagicMock()
+        app.exit = MagicMock()
+        return app
+
+    @pytest.mark.asyncio
+    async def test_command_context_exit_cleans_up_while_streaming(self) -> None:
+        app = self._make_streaming_app()
+
+        request_exit = app._build_command_context("").config["request_exit"]
+        await request_exit()
+
+        app._agent_task.cancel.assert_not_called()
+        app.agent._extract_memories.assert_awaited_once_with(app.conversation)
+        app.hook_engine.run_hooks.assert_awaited_once()
+        app._shutdown_mcp.assert_awaited_once_with()
+        app._stale_cleanup_task.cancel.assert_called_once_with()
+        team = app.team_manager._teams["team"]
+        team.set_member_active.assert_called_once_with("worker", False)
+        app.team_manager.delete_team.assert_called_once_with("team")
+        app.session.close.assert_called_once_with()
+        app.exit.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_command_context_exit_does_not_repeat_cleanup(self) -> None:
+        app = self._make_streaming_app()
+        request_exit = app._build_command_context("").config["request_exit"]
+
+        await request_exit()
+        await request_exit()
+
+        app.agent._extract_memories.assert_awaited_once_with(app.conversation)
+        app.hook_engine.run_hooks.assert_awaited_once()
+        app._shutdown_mcp.assert_awaited_once_with()
+        app._stale_cleanup_task.cancel.assert_called_once_with()
+        app.session.close.assert_called_once_with()
+
 class TestSkillHandler:
     @pytest.mark.asyncio
     async def test_skill_list_no_loader(self) -> None:

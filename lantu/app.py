@@ -987,7 +987,7 @@ class LantuApp(App):
                 "render_restored": self._render_restored_messages,
                 "skill_loader": self.skill_loader,
                 "skill_executor": self.skill_executor,
-                "request_exit": self.action_handle_ctrl_c,
+                "request_exit": self.request_exit,
             },
         )
 
@@ -1881,6 +1881,9 @@ class LantuApp(App):
                 pass
             return
 
+        await self.request_exit()
+
+    async def request_exit(self) -> None:
         if getattr(self, "_exit_requested", False):
             self.exit()
             return
