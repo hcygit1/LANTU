@@ -74,6 +74,9 @@ class InlineApp:
             self.transcript,
             permission_handler=self.handle_permission,
         )
+        ask_user_tool = self.runtime.registry.get("AskUserQuestion")
+        if isinstance(ask_user_tool, AskUserTool):
+            ask_user_tool.set_handler(self.handle_ask_user)
         self.dispatcher = InlineCommandDispatcher(self)
 
         self.running = True
@@ -105,10 +108,7 @@ class InlineApp:
             self.agent.permission_mode.value,
             self.agent.work_dir,
         )
-        startup_messages = list(self.runtime.startup_messages)
-        self.runtime.startup_messages.clear()
-        for message in startup_messages:
-            self.transcript.system_message(message)
+        self._drain_startup_messages()
 
         try:
             while self.running:
@@ -170,11 +170,13 @@ class InlineApp:
     async def run_prompt(self, text: str, is_notification: bool = False) -> None:
         self.confirm_exit = False
         prefetch_task: asyncio.Task[str] | None = None
-        history_cursor: int | None = None
+        seen_message_ids: set[int] = set()
+        agent_started = False
         finished = False
         try:
             self.runtime.refresh_skills_if_needed()
             await self.runtime.wait_until_ready()
+            self._drain_startup_messages()
 
             if text and "@" in text:
                 text = expand_at_refs(text, self.agent.work_dir)
@@ -197,11 +199,18 @@ class InlineApp:
                 self.agent.memory_recall_task = prefetch_task
                 self.agent._memory_recall_consumed = False
 
-            history_cursor = len(self.runtime.conversation.history)
             async for event in self.agent.run(self.runtime.conversation):
+                if not agent_started:
+                    seen_message_ids.update(
+                        id(message) for message in self.runtime.conversation.history
+                    )
+                    agent_started = True
+
                 if isinstance(event, CompactNotification):
                     self.persist_compact_boundary(event)
-                    history_cursor = len(self.runtime.conversation.history)
+                    seen_message_ids.update(
+                        id(message) for message in self.runtime.conversation.history
+                    )
 
                 await self.events.handle(event)
 
@@ -213,10 +222,10 @@ class InlineApp:
                     ):
                         await self.handle_ask_user(ask_tool._pending_event)
                 elif isinstance(event, TurnComplete):
-                    history_cursor = self.persist_history_from(history_cursor)
+                    self.persist_unseen_messages(seen_message_ids)
                 elif isinstance(event, LoopComplete):
                     finished = True
-                    history_cursor = self.persist_history_from(history_cursor)
+                    self.persist_unseen_messages(seen_message_ids)
                     if self.agent.plan_mode:
                         await self.handle_plan_approval()
         except asyncio.CancelledError:
@@ -232,9 +241,9 @@ class InlineApp:
         finally:
             if not finished:
                 self.events.finish()
-            if history_cursor is not None:
-                self.persist_history_from(history_cursor)
-            self.runtime.session.meta.total_tokens = (
+            if agent_started:
+                self.persist_unseen_messages(seen_message_ids)
+            self.runtime.session.update_total_tokens(
                 self.agent.total_input_tokens + self.agent.total_output_tokens
             )
             await self._cleanup_memory_prefetch(prefetch_task)
@@ -254,11 +263,13 @@ class InlineApp:
         if self.agent.memory_recall_task is prefetch_task:
             self.agent.memory_recall_task = None
 
-    def persist_history_from(self, cursor: int) -> int:
-        history = self.runtime.conversation.history
-        for message in history[cursor:]:
+    def persist_unseen_messages(self, seen_message_ids: set[int]) -> None:
+        for message in self.runtime.conversation.history:
+            identity = id(message)
+            if identity in seen_message_ids:
+                continue
             self.runtime.session.append(message)
-        return len(history)
+            seen_message_ids.add(identity)
 
     def persist_compact_boundary(self, notification: CompactNotification) -> None:
         boundary = notification.boundary
@@ -324,8 +335,8 @@ class InlineApp:
                 message = str(question.get("message", name))
                 question_type = str(question.get("type", "text"))
                 options = [
-                    str(option.get("label", ""))
-                    if isinstance(option, dict)
+                    str(option["label"])
+                    if isinstance(option, dict) and "label" in option
                     else str(option)
                     for option in question.get("options", [])
                 ]
@@ -336,7 +347,7 @@ class InlineApp:
                 if question_type == "checkbox":
                     selected = await self.prompt.choose_many(message, options)
                     answers[name] = ", ".join(selected)
-                elif question_type in {"radio", "select"}:
+                elif question_type in {"radio", "select"} and options:
                     answers[name] = await self.prompt.choose(message, options)
                 else:
                     answers[name] = await self.prompt.ask_text(message)
@@ -361,17 +372,18 @@ class InlineApp:
 
         try:
             choice = await self.prompt.choose("计划", PLAN_CHOICES)
-        except (KeyboardInterrupt, EOFError):
+        except (asyncio.CancelledError, KeyboardInterrupt, EOFError):
             choice = "manual"
 
         if choice == "feedback":
             try:
                 feedback = await self.prompt.ask_text("修改意见")
-            except (KeyboardInterrupt, EOFError):
-                feedback = ""
-            if feedback:
-                self.pending_prompts.append(feedback)
-            return
+            except (asyncio.CancelledError, KeyboardInterrupt, EOFError):
+                choice = "manual"
+            else:
+                if feedback:
+                    self.pending_prompts.append(feedback)
+                return
 
         if choice == "yolo":
             self.agent.set_permission_mode(PermissionMode.BYPASS)
@@ -437,6 +449,7 @@ class InlineApp:
     def _set_conversation(self, conversation: ConversationManager) -> None:
         self.runtime.conversation = conversation
         self.conversation = conversation
+        self._mcp_injected = False
 
     async def _render_restored(self, messages: list[Message]) -> None:
         for message in messages:
@@ -472,12 +485,18 @@ class InlineApp:
     def request_exit(self) -> None:
         self.running = False
 
-    async def show_last_tool_details(self) -> None:
+    def show_last_tool_details(self) -> None:
         if self.events.last_tool is None:
             self.transcript.system_message("暂无工具详情")
             return
         self.live.stop()
         self.transcript.tool_details(self.events.last_tool)
+
+    def _drain_startup_messages(self) -> None:
+        startup_messages = list(self.runtime.startup_messages)
+        self.runtime.startup_messages.clear()
+        for message in startup_messages:
+            self.transcript.system_message(message)
 
     async def show_command_list(self) -> None:
         lines = ["可用命令："]

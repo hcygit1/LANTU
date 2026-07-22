@@ -5,11 +5,15 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from lantu.tools.base import Tool, ToolResult
+
+
+ASK_USER_TIMEOUT_SECONDS = 300.0
 
 
 class QuestionItem(BaseModel):
@@ -40,6 +44,9 @@ class AskUserEvent:
         self.future = future
 
 
+AskUserHandler = Callable[[AskUserEvent], Awaitable[None]]
+
+
 class AskUserTool(Tool):
     name = "AskUserQuestion"
     description = (
@@ -56,6 +63,10 @@ class AskUserTool(Tool):
 
     def __init__(self) -> None:
         self._pending_event: AskUserEvent | None = None
+        self._handler: AskUserHandler | None = None
+
+    def set_handler(self, handler: AskUserHandler | None) -> None:
+        self._handler = handler
 
     async def execute(self, params: AskUserParams) -> ToolResult:
         questions_data = [q.model_dump() for q in params.questions]
@@ -63,16 +74,28 @@ class AskUserTool(Tool):
         loop = asyncio.get_running_loop()
         future: asyncio.Future[dict[str, str]] = loop.create_future()
 
-        self._pending_event = AskUserEvent(questions=questions_data, future=future)
+        event = AskUserEvent(questions=questions_data, future=future)
+        self._pending_event = event
+
+        async def wait_for_answer() -> dict[str, str]:
+            if self._handler is not None:
+                await self._handler(event)
+            return await future
 
         try:
-            answers = await asyncio.wait_for(future, timeout=300)
+            answers = await asyncio.wait_for(
+                wait_for_answer(),
+                timeout=ASK_USER_TIMEOUT_SECONDS,
+            )
         except asyncio.TimeoutError:
             return ToolResult(
                 output="User did not respond within 5 minutes", is_error=True
             )
         finally:
-            self._pending_event = None
+            if not future.done():
+                future.set_result({})
+            if self._pending_event is event:
+                self._pending_event = None
 
         lines = []
         for q in params.questions:

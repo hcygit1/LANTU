@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, AsyncIterator
 
 import pytest
 from rich.console import Console
 
 from lantu.agent import (
+    Agent,
     CompactNotification,
     LoopComplete,
     PermissionRequest,
@@ -17,10 +19,14 @@ from lantu.agent import (
     ToolResultEvent,
     TurnComplete,
 )
+from lantu.client import LLMClient, LLMError
 from lantu.commands import Command, CommandRegistry, CommandType
 from lantu.conversation import ConversationManager, Message
+from lantu.memory.session import SessionManager
 from lantu.permissions import PermissionMode
-from lantu.tools.ask_user import AskUserEvent, AskUserTool
+from lantu.tools import ToolRegistry
+from lantu.tools.ask_user import AskUserEvent, AskUserParams, AskUserTool
+from lantu.tools.base import StreamEnd, StreamEvent, TextDelta, ToolCallComplete
 
 
 class FakePrompt:
@@ -70,6 +76,7 @@ class FakeTranscript:
         self.commits: list[Any] = []
         self.clear_count = 0
         self.details: list[Any] = []
+        self.tool_messages: list[Any] = []
 
     def header(self, model: str, mode: str, work_dir: str) -> None:
         self.headers.append((model, mode, work_dir))
@@ -94,6 +101,9 @@ class FakeTranscript:
 
     def tool_details(self, state: Any) -> None:
         self.details.append(state)
+
+    def tool(self, state: Any) -> None:
+        self.tool_messages.append(state)
 
 
 class FakeLive:
@@ -124,6 +134,9 @@ class FakeSession:
 
     def close(self) -> None:
         self.closed = True
+
+    def update_total_tokens(self, total: int) -> None:
+        self.meta.total_tokens = total
 
 
 class FakeToolRegistry:
@@ -239,6 +252,20 @@ class FakeRuntime:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class ScriptedClient(LLMClient):
+    def __init__(self, responses: list[list[StreamEvent]]) -> None:
+        self.responses = list(responses)
+
+    async def stream(
+        self,
+        conversation: ConversationManager,
+        system: str = "",
+        tools: list[dict[str, Any]] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        for event in self.responses.pop(0):
+            yield event
 
 
 def make_app(
@@ -458,6 +485,71 @@ async def test_run_prompt_persists_messages_tokens_and_mcp_once(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
+async def test_real_agent_session_persists_only_user_and_assistant_once(
+    tmp_path: Path,
+) -> None:
+    client = ScriptedClient(
+        [[TextDelta("完成"), StreamEnd("end_turn", input_tokens=9, output_tokens=3)]]
+    )
+    registry = ToolRegistry()
+    runtime = FakeRuntime(tmp_path)
+    runtime.agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+    runtime.registry = registry
+    runtime.conversation = ConversationManager()
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    runtime.session_manager = manager
+    runtime.session = session
+    runtime.mcp_instructions = "MCP system reminder"
+    app = make_app(runtime)
+
+    await app.run_prompt("介绍项目")
+    session_id = session.session_id
+    session.close()
+    resumed = manager.resume(session_id)
+
+    assert resumed is not None
+    assert [(message.role, message.content) for message in resumed.messages] == [
+        ("user", "介绍项目"),
+        ("assistant", "完成"),
+    ]
+    resumed.session.close()
+
+
+@pytest.mark.asyncio
+async def test_agent_error_before_first_event_does_not_persist_injected_history(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+
+    async def fail_before_event(conversation: ConversationManager):
+        conversation.inject_environment("internal environment")
+        raise LLMError("failed before event")
+        yield
+
+    runtime.agent.run = fail_before_event  # type: ignore[method-assign]
+    app = make_app(runtime)
+
+    await app.run_prompt("user input")
+
+    assert [(message.role, message.content) for message in runtime.session.messages] == [
+        ("user", "user input")
+    ]
+
+
+def test_session_update_total_tokens_is_saved_to_meta(tmp_path: Path) -> None:
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session_id = session.session_id
+
+    session.update_total_tokens(321)
+    session.close()
+
+    persisted = next(meta for meta in manager.list() if meta.id == session_id)
+    assert persisted.total_tokens == 321
+
+
+@pytest.mark.asyncio
 async def test_cancelled_run_prompt_returns_to_input_loop(tmp_path: Path) -> None:
     runtime = FakeRuntime(tmp_path)
 
@@ -546,6 +638,173 @@ async def test_handle_ask_user_cancellation_returns_empty_answers(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_ask_user_tool_without_handler_keeps_pending_event_compatibility() -> None:
+    tool = AskUserTool()
+    params = AskUserParams.model_validate(
+        {
+            "questions": [
+                {
+                    "name": "choice",
+                    "message": "选择",
+                    "type": "radio",
+                    "options": ["A"],
+                }
+            ]
+        }
+    )
+
+    task = asyncio.create_task(tool.execute(params))
+    await asyncio.sleep(0)
+    assert tool._pending_event is not None
+    tool._pending_event.future.set_result({"choice": "A"})
+
+    result = await task
+
+    assert result.output == "choice: A"
+    assert tool._pending_event is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("handler failed"), asyncio.CancelledError()])
+async def test_ask_user_handler_failure_completes_future_and_cleans_pending(
+    error: BaseException,
+) -> None:
+    tool = AskUserTool()
+    captured: list[AskUserEvent] = []
+
+    async def fail(event: AskUserEvent) -> None:
+        captured.append(event)
+        raise error
+
+    tool.set_handler(fail)
+    params = AskUserParams.model_validate(
+        {"questions": [{"name": "x", "message": "x", "type": "text"}]}
+    )
+
+    with pytest.raises(type(error)):
+        await tool.execute(params)
+
+    assert captured[0].future.done()
+    assert tool._pending_event is None
+
+
+@pytest.mark.asyncio
+async def test_ask_user_handler_timeout_cancels_handler_and_cleans_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("lantu.tools.ask_user.ASK_USER_TIMEOUT_SECONDS", 0.01)
+    tool = AskUserTool()
+    cancelled = False
+    captured: list[AskUserEvent] = []
+
+    async def wait_forever(event: AskUserEvent) -> None:
+        nonlocal cancelled
+        captured.append(event)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled = True
+
+    tool.set_handler(wait_forever)
+    params = AskUserParams.model_validate(
+        {"questions": [{"name": "x", "message": "x", "type": "text"}]}
+    )
+
+    result = await tool.execute(params)
+
+    assert result.is_error is True
+    assert cancelled is True
+    assert captured[0].future.done()
+    assert tool._pending_event is None
+
+
+@pytest.mark.asyncio
+async def test_real_agent_ask_user_tool_completes_inside_agent_loop(tmp_path: Path) -> None:
+    ask_tool = AskUserTool()
+    registry = ToolRegistry()
+    registry.register(ask_tool)
+    registry.mark_discovered(ask_tool.name)
+    client = ScriptedClient(
+        [
+            [
+                TextDelta("需要确认"),
+                ToolCallComplete(
+                    "ask-1",
+                    "AskUserQuestion",
+                    {
+                        "questions": [
+                            {
+                                "name": "choice",
+                                "message": "选择",
+                                "type": "radio",
+                                "options": ["A", "B"],
+                            }
+                        ]
+                    },
+                ),
+                StreamEnd("end_turn", input_tokens=10, output_tokens=5),
+            ],
+            [
+                TextDelta("已收到"),
+                StreamEnd("end_turn", input_tokens=12, output_tokens=4),
+            ],
+        ]
+    )
+    runtime = FakeRuntime(tmp_path)
+    runtime.agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+    runtime.registry = registry
+    runtime.conversation = ConversationManager()
+    transcript = FakeTranscript()
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(choices=["A"]),
+        transcript=transcript,
+    )
+
+    await asyncio.wait_for(app.run_prompt("需要答案"), timeout=0.5)
+
+    assert any(tool.output == "choice: A" for tool in transcript.tool_messages)
+    assert transcript.assistant_messages[-1] == "已收到"
+    assert runtime.agent._loop_count == 1
+    assert ask_tool._pending_event is None
+
+
+@pytest.mark.asyncio
+async def test_ask_user_option_fallbacks_do_not_require_labels_or_choices(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    prompt = FakePrompt(choices=["{'value': 'raw'}"], texts=["free text"])
+    app = make_app(runtime, prompt=prompt)
+    future = asyncio.get_running_loop().create_future()
+
+    await app.handle_ask_user(
+        AskUserEvent(
+            [
+                {
+                    "name": "raw",
+                    "message": "raw",
+                    "type": "select",
+                    "options": [{"value": "raw"}],
+                },
+                {
+                    "name": "empty",
+                    "message": "empty",
+                    "type": "radio",
+                    "options": [],
+                },
+            ],
+            future,
+        )
+    )
+
+    assert future.result() == {
+        "raw": "{'value': 'raw'}",
+        "empty": "free text",
+    }
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("choice", "expected_mode"),
     [("yolo", PermissionMode.BYPASS), ("manual", PermissionMode.DEFAULT)],
@@ -588,6 +847,20 @@ async def test_plan_path_oserror_returns_to_input_loop(tmp_path: Path) -> None:
         raise OSError("read only")
 
     runtime.agent._get_plan_path = fail_plan_path  # type: ignore[method-assign]
+
+    await app.handle_plan_approval()
+
+    assert runtime.agent.permission_mode is PermissionMode.DEFAULT
+    assert len(app.pending_prompts) == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_prompt_cancellation_is_consumed_as_manual_approval(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    app = make_app(runtime, prompt=FakePrompt(choices=[asyncio.CancelledError()]))
+    app.set_plan_mode(True)
 
     await app.handle_plan_approval()
 
@@ -686,6 +959,53 @@ async def test_command_context_syncs_runtime_references_and_restores_messages(
     assert transcript.assistant_messages == ["answer"]
 
 
+@pytest.mark.asyncio
+async def test_set_conversation_reinjects_mcp_on_next_prompt(tmp_path: Path) -> None:
+    runtime = FakeRuntime(
+        tmp_path,
+        [[LoopComplete(1)], [LoopComplete(1)]],
+    )
+    runtime.mcp_instructions = "MCP rules"
+    app = make_app(runtime)
+
+    await app.run_prompt("first")
+    new_conversation = ConversationManager()
+    app.build_command_context("").config["set_conversation"](new_conversation)
+    await app.run_prompt("second")
+
+    reminders = [message for message in new_conversation.history if "MCP rules" in message.content]
+    assert len(reminders) == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_messages_added_while_waiting_are_drained_once(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path, [[LoopComplete(1)]])
+    runtime.startup_messages = ["initial warning"]
+    added = False
+
+    async def wait_with_warning() -> None:
+        nonlocal added
+        if not added:
+            runtime.startup_messages.append("late warning")
+            added = True
+
+    runtime.wait_until_ready = wait_with_warning  # type: ignore[method-assign]
+    transcript = FakeTranscript()
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(prompts=["go", EOFError()]),
+        transcript=transcript,
+    )
+
+    await app.run()
+
+    assert transcript.system_messages.count("initial warning") == 1
+    assert transcript.system_messages.count("late warning") == 1
+    assert runtime.startup_messages == []
+
+
 def test_ui_controller_methods_queue_prompts_modes_and_exit(tmp_path: Path) -> None:
     runtime = FakeRuntime(tmp_path)
     transcript = FakeTranscript()
@@ -702,14 +1022,27 @@ def test_ui_controller_methods_queue_prompts_modes_and_exit(tmp_path: Path) -> N
     assert app.running is False
 
 
-@pytest.mark.asyncio
-async def test_show_last_tool_details_has_empty_state(tmp_path: Path) -> None:
+def test_show_last_tool_details_is_synchronous_and_has_empty_state(tmp_path: Path) -> None:
     transcript = FakeTranscript()
     app = make_app(FakeRuntime(tmp_path), transcript=transcript)
 
-    await app.show_last_tool_details()
+    result = app.show_last_tool_details()
 
+    assert inspect.isawaitable(result) is False
     assert transcript.system_messages[-1] == "暂无工具详情"
+
+
+def test_show_last_tool_details_synchronously_outputs_tool(tmp_path: Path) -> None:
+    transcript = FakeTranscript()
+    live = FakeLive()
+    app = make_app(FakeRuntime(tmp_path), transcript=transcript, live=live)
+    app.events.last_tool = SimpleNamespace(name="Bash", output="done")
+
+    result = app.show_last_tool_details()
+
+    assert inspect.isawaitable(result) is False
+    assert transcript.details == [app.events.last_tool]
+    assert live.stop_count == 1
 
 
 @pytest.mark.asyncio

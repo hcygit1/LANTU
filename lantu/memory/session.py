@@ -398,6 +398,11 @@ class Session:
         self.meta.last_active = datetime.now(timezone.utc)
         self.meta.save(self._sessions_dir / f"{self.session_id}.meta")
 
+    def update_total_tokens(self, total: int) -> None:
+        self.meta.total_tokens = total
+        self.meta.last_active = datetime.now(timezone.utc)
+        self.meta.save(self._sessions_dir / f"{self.session_id}.meta")
+
 
     def close(self) -> None:
         if self._file and not self._file.closed:
