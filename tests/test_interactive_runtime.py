@@ -45,6 +45,14 @@ class FakeClient(LLMClient):
         self.close_calls += 1
 
 
+class DefaultCloseClient(LLMClient):
+    def __init__(self, transport) -> None:
+        self._client = transport
+
+    async def stream(self, *_args, **_kwargs) -> AsyncIterator[StreamEvent]:
+        yield StreamEnd("end_turn")
+
+
 @pytest.fixture
 def provider() -> ProviderConfig:
     return ProviderConfig(
@@ -676,6 +684,81 @@ def test_importing_runtime_does_not_load_textual() -> None:
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.asyncio
+async def test_llm_client_close_failure_can_be_retried() -> None:
+    class Transport:
+        calls = 0
+
+        async def aclose(self) -> None:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("close failed")
+
+    transport = Transport()
+    client = DefaultCloseClient(transport)
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        await client.aclose()
+    await client.aclose()
+
+    assert transport.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_llm_client_close_calls_share_one_task() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Transport:
+        calls = 0
+
+        async def aclose(self) -> None:
+            self.calls += 1
+            started.set()
+            await release.wait()
+
+    transport = Transport()
+    client = DefaultCloseClient(transport)
+    first = asyncio.create_task(client.aclose())
+    await started.wait()
+    second = asyncio.create_task(client.aclose())
+    await asyncio.sleep(0)
+
+    assert not second.done()
+    release.set()
+    await asyncio.gather(first, second)
+    assert transport.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_close_waiter_does_not_cancel_shared_client_close() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Transport:
+        calls = 0
+
+        async def aclose(self) -> None:
+            self.calls += 1
+            started.set()
+            await release.wait()
+
+    transport = Transport()
+    client = DefaultCloseClient(transport)
+    first = asyncio.create_task(client.aclose())
+    await started.wait()
+    second = asyncio.create_task(client.aclose())
+    await asyncio.sleep(0)
+    first.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert not second.done()
+    release.set()
+    await second
+    assert transport.calls == 1
 
 
 @pytest.mark.asyncio

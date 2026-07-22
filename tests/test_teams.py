@@ -63,6 +63,87 @@ def test_team_cleanup_limits_git_timeout_to_deadline(monkeypatch) -> None:
     assert 0 < timeouts[0] <= 0.05
     with pytest.raises(TeamError):
         manager.delete_team("missing", deadline=deadline, timeout=10)
+
+
+def test_tmux_kill_pane_forwards_timeout(monkeypatch) -> None:
+    from lantu.teams import spawn_tmux
+
+    timeouts: list[float] = []
+
+    def fake_run(*_args, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        return MagicMock(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(spawn_tmux.subprocess, "run", fake_run)
+
+    spawn_tmux.kill_pane("pane-1", timeout=0.02)
+
+    assert timeouts == [0.02]
+
+
+def test_delete_team_stops_external_cleanup_after_deadline(monkeypatch) -> None:
+    from lantu.teams.manager import TeamManager
+
+    manager = TeamManager()
+    team = AgentTeam(name="deadline", lead_agent_id="lead")
+    for index in range(2):
+        member = TeammateInfo(
+            name=f"member-{index}",
+            agent_id=f"agent-{index}",
+            agent_type="general",
+            model="test",
+            worktree_path=f"/tmp/worktree-{index}",
+            backend_type=BackendType.TMUX.value,
+            is_active=False,
+        )
+        team.members.append(member)
+        manager._pane_ids[member.agent_id] = f"pane-{index}"
+    manager._teams[team.name] = team
+    calls: list[str] = []
+
+    def slow_kill(_pane, _backend, timeout=10):
+        calls.append("pane")
+        time.sleep(0.02)
+
+    monkeypatch.setattr(manager, "_kill_pane", slow_kill)
+    monkeypatch.setattr(
+        manager,
+        "_cleanup_worktree",
+        lambda *_args, **_kwargs: calls.append("worktree"),
+    )
+    monkeypatch.setattr(
+        manager, "get_mailbox", lambda _name: calls.append("mailbox")
+    )
+    monkeypatch.setattr(
+        manager, "_remove_dir", lambda *_args, **_kwargs: calls.append("remove")
+    )
+
+    manager.delete_team(team.name, deadline=time.monotonic() + 0.01)
+
+    assert calls == ["pane"]
+
+
+def test_mailbox_cleanup_all_stops_between_files_at_deadline(
+    tmp_path, monkeypatch
+) -> None:
+    mailbox = Mailbox(tmp_path)
+    for name in ("a.json", "b.json", "c.json"):
+        (tmp_path / name).write_text("[]", encoding="utf-8")
+    original_unlink = Path.unlink
+    removed: list[str] = []
+
+    def slow_unlink(path, *args, **kwargs):
+        removed.append(path.name)
+        result = original_unlink(path, *args, **kwargs)
+        time.sleep(0.02)
+        return result
+
+    monkeypatch.setattr(Path, "unlink", slow_unlink)
+
+    mailbox.cleanup_all(deadline=time.monotonic() + 0.01)
+
+    assert len(removed) == 1
+    assert len(list(tmp_path.iterdir())) == 2
 from lantu.tools.base import Tool, ToolResult
 
 # =====================================================================

@@ -21,12 +21,12 @@ class TmuxSpawnError(Exception):
     pass
 
 
-def _run_tmux(*args: str) -> str:
+def _run_tmux(*args: str, timeout: float = 10) -> str:
     result = subprocess.run(
         ["tmux", *args],
         capture_output=True,
         text=True,
-        timeout=10,
+        timeout=timeout,
     )
     if result.returncode != 0:
         raise TmuxSpawnError(f"tmux {' '.join(args)} failed: {result.stderr.strip()}")
@@ -95,8 +95,8 @@ def send_keys_to_pane(pane_id: str, keys: str = "") -> None:
         log.warning("Failed to send keys to tmux pane %s", pane_id)
 
 
-def kill_pane(pane_id: str) -> None:
+def kill_pane(pane_id: str, timeout: float = 10) -> None:
     try:
-        _run_tmux("kill-pane", "-t", pane_id)
+        _run_tmux("kill-pane", "-t", pane_id, timeout=timeout)
     except TmuxSpawnError:
         pass

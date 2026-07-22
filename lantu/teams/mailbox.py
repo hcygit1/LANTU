@@ -165,11 +165,13 @@ class Mailbox:
         self._inbox_path(agent_id).unlink(missing_ok=True)
         self._lock_path(agent_id).unlink(missing_ok=True)
 
-    def cleanup_all(self) -> None:
+    def cleanup_all(self, deadline: float | None = None) -> None:
         """Remove all inbox files."""
         if not self._base_dir.exists():
             return
         for f in self._base_dir.iterdir():
+            if deadline is not None and time.monotonic() >= deadline:
+                return
             f.unlink(missing_ok=True)
 
 

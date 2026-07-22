@@ -4,6 +4,7 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from abc import ABC, abstractmethod
@@ -120,7 +121,14 @@ class LLMClient(ABC):
     async def aclose(self) -> None:
         if getattr(self, "_lantu_client_closed", False):
             return
-        self._lantu_client_closed = True
+        task = getattr(self, "_lantu_close_task", None)
+        if task is None:
+            task = asyncio.create_task(self._close_underlying_client())
+            self._lantu_close_task = task
+            task.add_done_callback(self._finish_close_task)
+        await asyncio.shield(task)
+
+    async def _close_underlying_client(self) -> None:
         client = getattr(self, "_client", None)
         if client is None:
             return
@@ -130,6 +138,16 @@ class LLMClient(ABC):
         result = close()
         if inspect.isawaitable(result):
             await result
+
+    def _finish_close_task(self, task: asyncio.Task[None]) -> None:
+        try:
+            exception = task.exception()
+        except asyncio.CancelledError:
+            exception = asyncio.CancelledError()
+        if exception is None:
+            self._lantu_client_closed = True
+        elif getattr(self, "_lantu_close_task", None) is task:
+            self._lantu_close_task = None
 
 
 def _supports_adaptive_thinking(model: str) -> bool:

@@ -192,25 +192,32 @@ class TeamManager:
                 handle.cancel()
 
             pane_id = self._pane_ids.pop(member.agent_id, None)
-            if pane_id and self._remaining_timeout(deadline, timeout) > 0:
-                self._kill_pane(pane_id, member.backend_type)
+            remaining = self._remaining_timeout(deadline, timeout)
+            if pane_id and remaining > 0:
+                self._kill_pane(
+                    pane_id, member.backend_type, timeout=remaining
+                )
 
-            if member.worktree_path:
+            remaining = self._remaining_timeout(deadline, timeout)
+            if member.worktree_path and remaining > 0:
                 self._cleanup_worktree(
-                    member.worktree_path, deadline=deadline, timeout=timeout
+                    member.worktree_path, deadline=deadline, timeout=remaining
                 )
 
             if self._trace_manager:
                 self._trace_manager.remove(member.agent_id)
 
-        if self._remaining_timeout(deadline, timeout) > 0:
+        remaining = self._remaining_timeout(deadline, timeout)
+        if remaining > 0:
             mailbox = self.get_mailbox(team_name)
             if mailbox:
-                mailbox.cleanup_all()
+                mailbox.cleanup_all(deadline=deadline)
 
+        remaining = self._remaining_timeout(deadline, timeout)
+        if remaining > 0:
             team_dir = resolve_team_dir(team_name)
-            self._remove_dir(team_dir)
-        else:
+            self._remove_dir(team_dir, deadline=deadline)
+        if self._remaining_timeout(deadline, timeout) <= 0:
             log.warning("Team '%s' external cleanup skipped: deadline exhausted", team_name)
 
         self._teams.pop(team_name, None)
@@ -272,11 +279,13 @@ class TeamManager:
             self.set_member_idle(team_name, member.name)
 
 
-    def _kill_pane(self, pane_id: str, backend_type: str) -> None:
+    def _kill_pane(
+        self, pane_id: str, backend_type: str, timeout: float = 10
+    ) -> None:
         try:
             if backend_type == BackendType.TMUX.value:
                 from lantu.teams.spawn_tmux import kill_pane
-                kill_pane(pane_id)
+                kill_pane(pane_id, timeout=timeout)
         except Exception as e:
             log.warning("Failed to kill pane %s: %s", pane_id, e)
 
@@ -313,10 +322,22 @@ class TeamManager:
             except Exception:
                 pass
 
-    def _remove_dir(self, path: Path) -> None:
+    def _remove_dir(self, path: Path, deadline: float | None = None) -> None:
         import shutil
         try:
-            if path.exists():
+            if not path.exists():
+                return
+            if deadline is None:
                 shutil.rmtree(path, ignore_errors=True)
+                return
+            for child in path.iterdir():
+                if time.monotonic() >= deadline:
+                    return
+                if child.is_dir() and not child.is_symlink():
+                    self._remove_dir(child, deadline=deadline)
+                else:
+                    child.unlink(missing_ok=True)
+            if time.monotonic() < deadline:
+                path.rmdir()
         except Exception as e:
             log.warning("Failed to remove directory %s: %s", path, e)
