@@ -9,9 +9,13 @@ def package_version() -> str:
         return "0.0.0"
 
 
-def sanitize_terminal_text(value: str) -> str:
+def sanitize_terminal_text(value: str, *, preserve_newlines: bool = False) -> str:
     return "".join(
-        " " if ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F else character
+        character
+        if preserve_newlines and character == "\n"
+        else " "
+        if ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F
+        else character
         for character in value
     )
 
