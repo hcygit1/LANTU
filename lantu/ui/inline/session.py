@@ -34,6 +34,8 @@ class InlineCompleter(Completer):
     def get_completions(
         self, document: Document, complete_event: Any
     ) -> Iterable[Completion]:
+        if document.text_after_cursor and not document.text_after_cursor[0].isspace():
+            return
         text = document.text_before_cursor
         if text.startswith("/") and not any(character.isspace() for character in text):
             for display, value in complete(self.registry, text):
@@ -69,6 +71,8 @@ class InlinePromptSession:
     ) -> None:
         history_file = Path(history_path).expanduser()
         history_file.parent.mkdir(parents=True, exist_ok=True)
+        self._chat_completer = InlineCompleter(registry, work_dir)
+        self._toggle_task: Awaitable[Any] | None = None
 
         bindings = KeyBindings()
 
@@ -84,12 +88,11 @@ class InlinePromptSession:
 
             @bindings.add("c-o")
             def toggle_details(event: Any) -> None:
-                pending = run_in_terminal(on_toggle_details)
-                event.app.create_background_task(pending)
+                self._toggle_task = run_in_terminal(on_toggle_details)
 
         self._session = PromptSession(
             history=FileHistory(str(history_file)),
-            completer=InlineCompleter(registry, work_dir),
+            completer=self._chat_completer,
             complete_while_typing=True,
             multiline=True,
             key_bindings=bindings,
@@ -100,6 +103,9 @@ class InlinePromptSession:
         return await self._session.prompt_async(
             HTML("<cyan>❯ </cyan>"),
             bottom_toolbar=HTML(f"<dim>{safe_status}</dim>"),
+            completer=self._chat_completer,
+            complete_while_typing=True,
+            multiline=True,
         )
 
     async def choose(self, label: str, choices: list[str]) -> str:

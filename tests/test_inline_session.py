@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,12 +17,17 @@ from lantu.commands.registry import Command, CommandRegistry, CommandType
 from lantu.config import ProviderConfig
 from lantu.ui.inline import session as session_module
 from lantu.ui.inline.session import InlineCompleter, InlinePromptSession, select_provider
+from lantu.ui.shared import references as references_module
 from lantu.ui.shared.references import MAX_AT_REF_BYTES, expand_at_refs, scan_files
 
 
-def _completions(completer: InlineCompleter, text: str):
-    document = Document(text, cursor_position=len(text))
+def _completions_at(completer: InlineCompleter, text: str, cursor_position: int):
+    document = Document(text, cursor_position=cursor_position)
     return list(completer.get_completions(document, None))
+
+
+def _completions(completer: InlineCompleter, text: str):
+    return _completions_at(completer, text, len(text))
 
 
 def _provider(name: str) -> ProviderConfig:
@@ -72,6 +78,24 @@ def test_command_completion_ignores_commands_with_arguments(tmp_path: Path) -> N
     register_all_commands(registry)
 
     assert _completions(InlineCompleter(registry, str(tmp_path)), "/help now") == []
+
+
+def test_command_completion_ignores_cursor_in_middle_of_token(tmp_path: Path) -> None:
+    registry = CommandRegistry()
+    register_all_commands(registry)
+    completer = InlineCompleter(registry, str(tmp_path))
+
+    assert _completions_at(completer, "/help", len("/he")) == []
+
+
+def test_command_completion_allows_whitespace_after_cursor(tmp_path: Path) -> None:
+    registry = CommandRegistry()
+    register_all_commands(registry)
+    completer = InlineCompleter(registry, str(tmp_path))
+
+    completions = _completions_at(completer, "/he next", len("/he"))
+
+    assert "/help" in [completion.text for completion in completions]
 
 
 def test_command_completion_sanitizes_external_display(tmp_path: Path) -> None:
@@ -187,6 +211,13 @@ def test_scan_files_skips_terminal_control_characters(tmp_path: Path) -> None:
     assert scan_files(str(tmp_path), "") == ["safe.txt"]
 
 
+def test_scan_files_skips_names_outside_shared_reference_syntax(tmp_path: Path) -> None:
+    for name in ["note.txt", "has space.txt", "plus+file.txt", "semi;file.txt", "at@file.txt"]:
+        (tmp_path / name).write_text("", encoding="utf-8")
+
+    assert scan_files(str(tmp_path), "") == ["note.txt"]
+
+
 def test_at_completion_replaces_reference_token(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("", encoding="utf-8")
     completer = InlineCompleter(CommandRegistry(), str(tmp_path))
@@ -195,6 +226,24 @@ def test_at_completion_replaces_reference_token(tmp_path: Path) -> None:
 
     assert completion.text == "@main.py"
     assert completion.start_position == -3
+
+
+def test_at_completion_ignores_cursor_in_middle_of_token(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    completer = InlineCompleter(CommandRegistry(), str(tmp_path))
+    text = "查看 @main.py"
+
+    assert _completions_at(completer, text, len("查看 @ma")) == []
+
+
+def test_at_completion_allows_whitespace_after_cursor(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    completer = InlineCompleter(CommandRegistry(), str(tmp_path))
+    text = "查看 @ma 后续"
+
+    completions = _completions_at(completer, text, len("查看 @ma"))
+
+    assert "@main.py" in [completion.text for completion in completions]
 
 
 def test_at_completion_stops_after_whitespace(tmp_path: Path) -> None:
@@ -211,6 +260,16 @@ def test_expand_at_refs_includes_file_content(tmp_path: Path) -> None:
 
     assert "[File: note.txt]" in expanded
     assert "hello" in expanded
+
+
+def test_expand_at_refs_preserves_sentence_period(tmp_path: Path) -> None:
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+
+    expanded = expand_at_refs("查看 @note.txt.", str(tmp_path))
+
+    assert "[File: note.txt]" in expanded
+    assert "hello" in expanded
+    assert expanded.endswith("```.")
 
 
 def test_expand_at_refs_keeps_missing_and_escaped_references(tmp_path: Path) -> None:
@@ -264,6 +323,81 @@ def test_expand_at_refs_keeps_reference_when_open_raises(
     assert expand_at_refs("查看 @note.txt", str(tmp_path)) == "查看 @note.txt"
 
 
+def test_expand_at_refs_rejects_fd_path_identity_mismatch_and_closes_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    note = tmp_path / "note.txt"
+    note.write_text("secret", encoding="utf-8")
+    original_open = Path.open
+    real_fstat = references_module.os.fstat
+    state = {"closed": False, "read": False}
+
+    class TrackingFile:
+        def __init__(self, wrapped: Any) -> None:
+            self.wrapped = wrapped
+
+        def __enter__(self) -> "TrackingFile":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            self.wrapped.close()
+            state["closed"] = True
+
+        def fileno(self) -> int:
+            return self.wrapped.fileno()
+
+        def read(self, size: int) -> bytes:
+            state["read"] = True
+            return self.wrapped.read(size)
+
+    def tracking_open(path: Path, *args: Any, **kwargs: Any) -> Any:
+        opened = original_open(path, *args, **kwargs)
+        return TrackingFile(opened) if path == note.resolve() else opened
+
+    def mismatched_fstat(fd: int) -> Any:
+        stat = real_fstat(fd)
+        return SimpleNamespace(st_dev=stat.st_dev, st_ino=stat.st_ino + 1)
+
+    monkeypatch.setattr(Path, "open", tracking_open)
+    monkeypatch.setattr(references_module.os, "fstat", mismatched_fstat)
+
+    assert expand_at_refs("@note.txt", str(tmp_path)) == "@note.txt"
+    assert state == {"closed": True, "read": False}
+
+
+def test_expand_at_refs_rejects_directory_swap_to_external_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = tmp_path / "docs"
+    directory.mkdir()
+    canonical_note = directory / "note.txt"
+    canonical_note.write_text("safe", encoding="utf-8")
+    moved_directory = tmp_path / "docs-safe"
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (outside / "note.txt").write_text("external secret", encoding="utf-8")
+    original_open = Path.open
+    swapped = False
+
+    def swap_then_open(path: Path, *args: Any, **kwargs: Any) -> Any:
+        nonlocal swapped
+        if path == canonical_note and not swapped:
+            swapped = True
+            directory.rename(moved_directory)
+            directory.symlink_to(outside, target_is_directory=True)
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", swap_then_open)
+
+    try:
+        assert expand_at_refs("@docs/note.txt", str(tmp_path)) == "@docs/note.txt"
+    finally:
+        if directory.is_symlink():
+            directory.unlink()
+        (outside / "note.txt").unlink()
+        outside.rmdir()
+
+
 def test_inline_prompt_session_configures_history_completer_and_bindings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -287,22 +421,31 @@ def test_inline_prompt_session_configures_history_completer_and_bindings(
     assert _binding_handler(captured["key_bindings"], Keys.Escape, Keys.ControlM)
 
 
-def test_inline_prompt_key_bindings_submit_newline_and_toggle(
+@pytest.mark.asyncio
+async def test_inline_prompt_key_bindings_submit_newline_and_toggle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, Any] = {}
     callback_calls: list[str] = []
     terminal_calls: list[Callable[[], Any]] = []
-    scheduled: list[object] = []
-    awaitable = object()
+    terminal_tasks: list[asyncio.Task[None]] = []
 
     class CapturingPromptSession:
         def __init__(self, **kwargs: Any) -> None:
             captured.update(kwargs)
 
-    def fake_run_in_terminal(callback: Callable[[], Any]) -> object:
+    def fake_run_in_terminal(callback: Callable[[], Any]) -> asyncio.Task[None]:
         terminal_calls.append(callback)
-        return awaitable
+
+        async def run_callback() -> None:
+            callback()
+
+        task = asyncio.create_task(run_callback())
+        terminal_tasks.append(task)
+        return task
+
+    def reject_second_schedule(_pending: object) -> None:
+        raise AssertionError("run_in_terminal already schedules its task")
 
     monkeypatch.setattr(session_module, "PromptSession", CapturingPromptSession)
     monkeypatch.setattr(session_module, "run_in_terminal", fake_run_in_terminal)
@@ -319,16 +462,16 @@ def test_inline_prompt_key_bindings_submit_newline_and_toggle(
     )
     event = SimpleNamespace(
         current_buffer=buffer,
-        app=SimpleNamespace(create_background_task=scheduled.append),
+        app=SimpleNamespace(create_background_task=reject_second_schedule),
     )
 
     _binding_handler(bindings, Keys.ControlM)(event)
     _binding_handler(bindings, Keys.Escape, Keys.ControlM)(event)
     _binding_handler(bindings, Keys.ControlO)(event)
-    terminal_calls[0]()
+    await terminal_tasks[0]
 
     assert callback_calls == ["submit", "\n", "toggle"]
-    assert scheduled == [awaitable]
+    assert terminal_calls
 
 
 @pytest.mark.asyncio
@@ -350,7 +493,34 @@ async def test_inline_prompt_and_text_facade_trim_and_sanitize(
     assert prompt_fragments == [("class:cyan", "❯ ")]
     assert "\x1b" not in "".join(fragment[1] for fragment in toolbar_fragments)
     assert "\n" not in "".join(fragment[1] for fragment in toolbar_fragments)
+    assert calls[0]["kwargs"]["completer"] is facade._chat_completer
+    assert calls[0]["kwargs"]["complete_while_typing"] is True
+    assert calls[0]["kwargs"]["multiline"] is True
     assert calls[1]["kwargs"]["multiline"] is False
+
+
+@pytest.mark.asyncio
+async def test_prompt_restores_real_prompt_session_state_after_choose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facade = InlinePromptSession(CommandRegistry(), str(tmp_path), str(tmp_path / "history"))
+    prompt_session = facade._session
+    responses = iter(["one", "message"])
+
+    async def fake_run_async(**_kwargs: Any) -> str:
+        return next(responses)
+
+    monkeypatch.setattr(prompt_session.app, "run_async", fake_run_async)
+    prompt_session._output = object()
+
+    assert await facade.choose("Provider", ["one", "two"]) == "one"
+    assert prompt_session.completer is not facade._chat_completer
+    assert prompt_session.multiline is False
+
+    assert await facade.prompt("ready") == "message"
+    assert prompt_session.completer is facade._chat_completer
+    assert prompt_session.complete_while_typing is True
+    assert prompt_session.multiline is True
 
 
 @pytest.mark.asyncio

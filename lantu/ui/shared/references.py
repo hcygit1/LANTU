@@ -7,7 +7,11 @@ from pathlib import Path
 
 MAX_AT_REF_BYTES = 10240
 
-_AT_REF_RE = re.compile(r"@([\w./_\-]+(?:\.[\w]+)*)")
+_PATH_SEGMENT_PATTERN = r"\.?[\w-]+(?:\.[\w-]+)*"
+_PATH_SEGMENT_RE = re.compile(_PATH_SEGMENT_PATTERN)
+_AT_REF_RE = re.compile(
+    rf"@({_PATH_SEGMENT_PATTERN}(?:/{_PATH_SEGMENT_PATTERN})*)"
+)
 _SKIP_DIRS = {
     ".git",
     "node_modules",
@@ -27,6 +31,11 @@ def _has_skipped_component(path: Path) -> bool:
     return any(part.startswith(".") or part in _SKIP_DIRS for part in path.parts)
 
 
+def _is_supported_reference_path(path: str) -> bool:
+    parts = path.removesuffix("/").split("/")
+    return bool(parts) and all(_PATH_SEGMENT_RE.fullmatch(part) for part in parts)
+
+
 def _is_within(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -41,6 +50,25 @@ def _resolve_root(work_dir: str) -> Path | None:
     except OSError:
         return None
     return root if root.is_dir() else None
+
+
+def _read_ref_file(full_path: Path, root: Path) -> str | None:
+    try:
+        with full_path.open("rb") as file:
+            opened_stat = os.fstat(file.fileno())
+            verified_path = full_path.resolve(strict=True)
+            if not _is_within(verified_path, root):
+                return None
+            path_stat = verified_path.stat()
+            if (opened_stat.st_dev, opened_stat.st_ino) != (
+                path_stat.st_dev,
+                path_stat.st_ino,
+            ):
+                return None
+            content = file.read(MAX_AT_REF_BYTES)
+    except OSError:
+        return None
+    return content.decode("utf-8", errors="replace")
 
 
 def scan_files(work_dir: str, prefix: str, limit: int = 10) -> list[str]:
@@ -99,7 +127,10 @@ def scan_files(work_dir: str, prefix: str, limit: int = 10) -> list[str]:
             continue
 
         relative = entry.relative_to(root).as_posix()
-        matches.append(relative + "/" if is_directory else relative)
+        candidate = relative + "/" if is_directory else relative
+        if not _is_supported_reference_path(candidate):
+            continue
+        matches.append(candidate)
         if len(matches) >= limit:
             break
     return matches
@@ -119,9 +150,10 @@ def expand_at_refs(text: str, work_dir: str) -> str:
             full_path = (root / relative).resolve(strict=True)
             if not _is_within(full_path, root) or not full_path.is_file():
                 return match.group(0)
-            with full_path.open("rb") as file:
-                content = file.read(MAX_AT_REF_BYTES).decode("utf-8", errors="replace")
         except OSError:
+            return match.group(0)
+        content = _read_ref_file(full_path, root)
+        if content is None:
             return match.group(0)
         return f"[File: {rel_path}]\n```\n{content}\n```"
 
