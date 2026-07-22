@@ -313,6 +313,49 @@ class TestPlanDoHandlers:
         assert ui._plan_mode is True
         assert "设计登录模块" in ui.sent_messages
 
+
+class TestExitHandler:
+    @pytest.mark.asyncio
+    async def test_exit_requests_exit_and_exposes_quit_alias(self) -> None:
+        from lantu.commands.handlers.exit import EXIT_COMMAND
+
+        requested: list[bool] = []
+        ctx = _make_context()
+        ctx.config = {"request_exit": lambda: requested.append(True)}
+
+        await EXIT_COMMAND.handler(ctx)
+
+        assert requested == [True]
+        assert "quit" in EXIT_COMMAND.aliases
+
+    @pytest.mark.asyncio
+    async def test_exit_awaits_async_callback(self) -> None:
+        from lantu.commands.handlers.exit import EXIT_COMMAND
+
+        requested: list[bool] = []
+
+        async def request_exit() -> None:
+            await asyncio.sleep(0)
+            requested.append(True)
+
+        ctx = _make_context()
+        ctx.config = {"request_exit": request_exit}
+
+        await EXIT_COMMAND.handler(ctx)
+
+        assert requested == [True]
+
+    @pytest.mark.asyncio
+    async def test_exit_reports_unsupported_frontend_without_callback(self) -> None:
+        from lantu.commands.handlers.exit import EXIT_COMMAND
+
+        ui = MockUI()
+        ctx = _make_context(ui=ui)
+
+        await EXIT_COMMAND.handler(ctx)
+
+        assert ui.messages == ["当前前端不支持 /exit"]
+
 class TestSkillHandler:
     @pytest.mark.asyncio
     async def test_skill_list_no_loader(self) -> None:
@@ -456,7 +499,7 @@ class TestRegisterAllCommands:
         expected = {
             "help", "compact", "clear", "plan",
             "session", "mcp", "memory", "permission",
-            "sandbox", "rewind", "status", "skill",
+            "sandbox", "rewind", "status", "skill", "exit",
         }
         assert names == expected
 
@@ -477,3 +520,13 @@ class TestRegisterAllCommands:
         assert registry.find("p").name == "plan"
         assert registry.find("s").name == "status"
         assert registry.find("?").name == "help"
+
+    def test_exit_and_quit_resolve_to_same_command(self) -> None:
+        from lantu.commands.handlers import register_all_commands
+
+        registry = CommandRegistry()
+        register_all_commands(registry)
+
+        exit_command = registry.find("exit")
+        assert exit_command is not None
+        assert registry.find("quit") is exit_command

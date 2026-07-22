@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from lantu.commands.handlers.clear import CLEAR_COMMAND
 from lantu.commands.handlers.compact import COMPACT_COMMAND
+from lantu.commands.handlers.exit import EXIT_COMMAND
 from lantu.commands.handlers.help import HELP_COMMAND
 from lantu.commands.handlers.mcp import MCP_COMMAND
 from lantu.commands.handlers.memory import MEMORY_COMMAND
@@ -22,6 +23,7 @@ from lantu.commands.registry import CommandRegistry
 
 ALL_COMMANDS = [
     HELP_COMMAND,
+    EXIT_COMMAND,
     COMPACT_COMMAND,
     CLEAR_COMMAND,
     PLAN_COMMAND,
@@ -39,4 +41,3 @@ ALL_COMMANDS = [
 def register_all_commands(registry: CommandRegistry) -> None:
     for cmd in ALL_COMMANDS:
         registry.register_sync(cmd)
-

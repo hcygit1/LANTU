@@ -512,6 +512,21 @@ async def test_command_dispatcher_handles_command_protocol(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_exit_command_stops_run_and_closes_runtime(tmp_path: Path) -> None:
+    from lantu.commands.handlers import register_all_commands
+
+    runtime = FakeRuntime(tmp_path)
+    register_all_commands(runtime.command_registry)
+    app = make_app(runtime)
+
+    assert await app.dispatcher.dispatch("/exit") is True
+    assert app.running is False
+    await app.run()
+
+    assert runtime.closed is True
+
+
+@pytest.mark.asyncio
 async def test_command_dispatcher_prompts_persists_config_and_reports_errors(
     tmp_path: Path,
 ) -> None:

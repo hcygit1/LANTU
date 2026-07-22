@@ -987,6 +987,7 @@ class LantuApp(App):
                 "render_restored": self._render_restored_messages,
                 "skill_loader": self.skill_loader,
                 "skill_executor": self.skill_executor,
+                "request_exit": self.action_handle_ctrl_c,
             },
         )
 
