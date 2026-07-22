@@ -170,7 +170,7 @@ class InlineApp:
     async def run_prompt(self, text: str, is_notification: bool = False) -> None:
         self.confirm_exit = False
         prefetch_task: asyncio.Task[str] | None = None
-        seen_message_ids: set[int] = set()
+        seen_messages: dict[int, Message] = {}
         agent_started = False
         finished = False
         try:
@@ -201,16 +201,14 @@ class InlineApp:
 
             async for event in self.agent.run(self.runtime.conversation):
                 if not agent_started:
-                    seen_message_ids.update(
-                        id(message) for message in self.runtime.conversation.history
-                    )
+                    for message in self.runtime.conversation.history:
+                        seen_messages[id(message)] = message
                     agent_started = True
 
                 if isinstance(event, CompactNotification):
                     self.persist_compact_boundary(event)
-                    seen_message_ids.update(
-                        id(message) for message in self.runtime.conversation.history
-                    )
+                    for message in self.runtime.conversation.history:
+                        seen_messages[id(message)] = message
 
                 await self.events.handle(event)
 
@@ -222,10 +220,10 @@ class InlineApp:
                     ):
                         await self.handle_ask_user(ask_tool._pending_event)
                 elif isinstance(event, TurnComplete):
-                    self.persist_unseen_messages(seen_message_ids)
+                    self.persist_unseen_messages(seen_messages)
                 elif isinstance(event, LoopComplete):
                     finished = True
-                    self.persist_unseen_messages(seen_message_ids)
+                    self.persist_unseen_messages(seen_messages)
                     if self.agent.plan_mode:
                         await self.handle_plan_approval()
         except asyncio.CancelledError:
@@ -242,7 +240,7 @@ class InlineApp:
             if not finished:
                 self.events.finish()
             if agent_started:
-                self.persist_unseen_messages(seen_message_ids)
+                self.persist_unseen_messages(seen_messages)
             self.runtime.session.update_total_tokens(
                 self.agent.total_input_tokens + self.agent.total_output_tokens
             )
@@ -263,13 +261,13 @@ class InlineApp:
         if self.agent.memory_recall_task is prefetch_task:
             self.agent.memory_recall_task = None
 
-    def persist_unseen_messages(self, seen_message_ids: set[int]) -> None:
+    def persist_unseen_messages(self, seen_messages: dict[int, Message]) -> None:
         for message in self.runtime.conversation.history:
             identity = id(message)
-            if identity in seen_message_ids:
+            if seen_messages.get(identity) is message:
                 continue
             self.runtime.session.append(message)
-            seen_message_ids.add(identity)
+            seen_messages[identity] = message
 
     def persist_compact_boundary(self, notification: CompactNotification) -> None:
         boundary = notification.boundary

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, AsyncIterator
+import weakref
 
 import pytest
 from rich.console import Console
@@ -535,6 +537,54 @@ async def test_agent_error_before_first_event_does_not_persist_injected_history(
     assert [(message.role, message.content) for message in runtime.session.messages] == [
         ("user", "user input")
     ]
+
+
+def test_persist_unseen_messages_compares_identity_when_ids_are_reused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import lantu.ui.inline.app as inline_app_module
+
+    runtime = FakeRuntime(tmp_path)
+    app = make_app(runtime)
+    old_message = Message(role="assistant", content="old")
+    new_message = Message(role="assistant", content="new")
+    runtime.conversation.history = [new_message]
+    seen_messages = {7: old_message}
+    monkeypatch.setattr(inline_app_module, "id", lambda _message: 7, raising=False)
+
+    app.persist_unseen_messages(seen_messages)
+
+    assert runtime.session.messages == [new_message]
+    assert seen_messages[7] is new_message
+
+
+@pytest.mark.asyncio
+async def test_compact_keeps_seen_messages_strongly_referenced_until_turn_ends(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    retained_during_compact: list[bool] = []
+
+    async def compacting_run(conversation: ConversationManager):
+        old_message = Message(role="assistant", content="old")
+        old_reference = weakref.ref(old_message)
+        conversation.history.append(old_message)
+        yield StreamText("working")
+        conversation.history.remove(old_message)
+        del old_message
+        gc.collect()
+        retained_during_compact.append(old_reference() is not None)
+        conversation.history[:] = [Message(role="assistant", content="summary")]
+        yield CompactNotification(100, "compacted", None)
+        yield LoopComplete(1)
+
+    runtime.agent.run = compacting_run  # type: ignore[method-assign]
+    app = make_app(runtime)
+
+    await app.run_prompt("start")
+
+    assert retained_during_compact == [True]
 
 
 def test_session_update_total_tokens_is_saved_to_meta(tmp_path: Path) -> None:
