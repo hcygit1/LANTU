@@ -200,6 +200,10 @@ def test_long_output_summary_is_bounded():
     assert len(summary) <= 180
 
 
+def test_read_tool_counts_lines_from_raw_output():
+    assert summarize_tool_output("ReadFile", "a\rb", False) == "读取 2 行"
+
+
 @pytest.mark.parametrize(
     ("name", "output", "is_error", "expected"),
     [

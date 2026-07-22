@@ -34,7 +34,7 @@ def summarize_tool_output(name: str, output: str, is_error: bool) -> str:
     safe_output = sanitize_terminal_text(output, preserve_newlines=True)
     clean = " ".join(safe_output.strip().split())
     if name in {"Read", "ReadFile"}:
-        return f"读取 {len(safe_output.splitlines())} 行"
+        return f"读取 {len(output.splitlines())} 行"
     if name in {"Write", "WriteFile", "Edit", "EditFile"}:
         return "修改已写入" if not is_error else clean[:180]
     if name == "Bash":
