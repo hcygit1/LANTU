@@ -87,7 +87,10 @@ def run_inline(config, permission_mode, hook_engine) -> None:
             hook_engine,
             os.getcwd(),
         )
-        await InlineApp(runtime).run()
+        try:
+            await InlineApp(runtime).run()
+        finally:
+            await runtime.close()
 
     asyncio.run(start())
 
@@ -159,10 +162,37 @@ def main() -> None:
     try:
         _main()
     except KeyboardInterrupt:
-        pass
+        raise SystemExit(130) from None
 
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
+    from lantu.client import create_client
+
+    provider = config.providers[0]
+    client = create_client(provider)
+    try:
+        await _run_prompt_with_client(
+            config,
+            permission_mode,
+            hook_engine,
+            prompt,
+            output_format,
+            provider,
+            client,
+        )
+    finally:
+        await client.aclose()
+
+
+async def _run_prompt_with_client(
+    config,
+    permission_mode,
+    hook_engine,
+    prompt: str,
+    output_format: str,
+    provider,
+    client,
+) -> None:
     from lantu.agent import (
         Agent,
         CompactNotification,
@@ -178,7 +208,7 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
         TurnComplete,
         UsageEvent,
     )
-    from lantu.client import create_client, resolve_context_window
+    from lantu.client import resolve_context_window
     from lantu.conversation import ConversationManager
     from lantu.memory.instructions import load_instructions
     from lantu.permissions import (
@@ -206,8 +236,6 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
         """输出一行 NDJSON 到 stdout"""
         print(json.dumps(obj, ensure_ascii=False), flush=True)
 
-    provider = config.providers[0]
-    client = create_client(provider)
     # 第 2 层：尽力从 provider 自动拉取模型的 context window（缓存在 provider 上）。
     # 不会抛异常或阻塞启动；失败则退化到映射表。
     await resolve_context_window(provider)

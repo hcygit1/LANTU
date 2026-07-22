@@ -51,7 +51,7 @@ class ProviderConfig:
     def resolve_api_key(self) -> str:
         if self.api_key:
             resolved = resolve_env_vars(self.api_key)
-            if _ENV_VAR_RE.fullmatch(resolved):
+            if _ENV_VAR_RE.search(resolved):
                 return ""
             return resolved
         env_var = _ENV_KEY_MAP.get(self.protocol, "")

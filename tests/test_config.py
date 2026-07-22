@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from lantu.config import ProviderConfig
 
 
@@ -25,6 +27,25 @@ def test_resolve_api_key_returns_empty_for_missing_explicit_environment(
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
     assert make_provider("${DEEPSEEK_API_KEY}").resolve_api_key() == ""
+
+
+@pytest.mark.parametrize(
+    ("api_key", "environment"),
+    [
+        ("prefix-${MISSING_KEY}", {}),
+        ("${PRESENT_KEY}-${MISSING_KEY}", {"PRESENT_KEY": "value"}),
+        ("${OUTER_KEY}", {"OUTER_KEY": "${INNER_KEY}"}),
+    ],
+)
+def test_resolve_api_key_rejects_any_remaining_environment_template(
+    monkeypatch, api_key, environment
+) -> None:
+    for name in ("MISSING_KEY", "PRESENT_KEY", "OUTER_KEY", "INNER_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+
+    assert make_provider(api_key).resolve_api_key() == ""
 
 
 def test_resolve_api_key_keeps_literal_key(monkeypatch) -> None:
