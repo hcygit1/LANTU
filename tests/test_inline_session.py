@@ -100,6 +100,13 @@ def test_scan_files_is_sorted_and_skips_internal_directories(tmp_path: Path) -> 
     assert scan_files(str(tmp_path), "ma") == ["main.py"]
 
 
+def test_scan_files_sorts_candidates_deterministically(tmp_path: Path) -> None:
+    (tmp_path / "b.py").write_text("", encoding="utf-8")
+    (tmp_path / "a.py").write_text("", encoding="utf-8")
+
+    assert scan_files(str(tmp_path), "") == ["a.py", "b.py"]
+
+
 def test_scan_files_marks_directories_and_completes_nested_paths(tmp_path: Path) -> None:
     source = tmp_path / "src"
     source.mkdir()
@@ -121,6 +128,55 @@ def test_scan_files_rejects_parent_and_symlink_escape(tmp_path: Path) -> None:
     finally:
         (outside / "secret.txt").unlink()
         outside.rmdir()
+
+
+def test_scan_files_rejects_symlinked_base_into_hidden_directory(tmp_path: Path) -> None:
+    hidden = tmp_path / ".hidden"
+    hidden.mkdir()
+    (hidden / "secret.txt").write_text("secret", encoding="utf-8")
+    (tmp_path / "visible").symlink_to(hidden, target_is_directory=True)
+
+    assert scan_files(str(tmp_path), "visible/") == []
+
+
+def test_scan_files_rejects_entry_resolving_through_skipped_directory(
+    tmp_path: Path,
+) -> None:
+    dependencies = tmp_path / "node_modules"
+    dependencies.mkdir()
+    target = dependencies / "internal.py"
+    target.write_text("secret", encoding="utf-8")
+    (tmp_path / "visible.py").symlink_to(target)
+
+    assert scan_files(str(tmp_path), "vis") == []
+
+
+def test_scan_files_returns_empty_when_iterdir_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_iterdir(_path: Path):
+        raise OSError("directory unavailable")
+
+    monkeypatch.setattr(Path, "iterdir", fail_iterdir)
+
+    assert scan_files(str(tmp_path), "") == []
+
+
+def test_scan_files_keeps_existing_results_when_entry_resolve_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "a.py").write_text("", encoding="utf-8")
+    (tmp_path / "b.py").write_text("", encoding="utf-8")
+    original_resolve = Path.resolve
+
+    def fail_one_resolve(path: Path, strict: bool = False) -> Path:
+        if path.name == "b.py":
+            raise OSError("entry unavailable")
+        return original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", fail_one_resolve)
+
+    assert scan_files(str(tmp_path), "") == ["a.py"]
 
 
 def test_scan_files_skips_terminal_control_characters(tmp_path: Path) -> None:
@@ -189,6 +245,23 @@ def test_expand_at_refs_does_not_load_the_whole_file(
     monkeypatch.setattr(Path, "read_bytes", reject_unbounded_read)
 
     assert "[File: large.txt]" in expand_at_refs("@large.txt", str(tmp_path))
+
+
+def test_expand_at_refs_keeps_reference_when_open_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    note = tmp_path / "note.txt"
+    note.write_text("secret", encoding="utf-8")
+    original_open = Path.open
+
+    def fail_note_open(path: Path, *args: Any, **kwargs: Any):
+        if path == note.resolve():
+            raise OSError("file unreadable")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_note_open)
+
+    assert expand_at_refs("查看 @note.txt", str(tmp_path)) == "查看 @note.txt"
 
 
 def test_inline_prompt_session_configures_history_completer_and_bindings(

@@ -23,6 +23,10 @@ def _has_terminal_controls(value: str) -> bool:
     return any(ord(character) < 0x20 or 0x7F <= ord(character) <= 0x9F for character in value)
 
 
+def _has_skipped_component(path: Path) -> bool:
+    return any(part.startswith(".") or part in _SKIP_DIRS for part in path.parts)
+
+
 def _is_within(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -58,12 +62,16 @@ def scan_files(work_dir: str, prefix: str, limit: int = 10) -> list[str]:
         relative_dir = prefix_path.parent
         name_prefix = prefix_path.name.lower()
 
-    if any(part.startswith(".") or part in _SKIP_DIRS for part in relative_dir.parts):
+    if _has_skipped_component(relative_dir):
         return []
 
     try:
         base = (root / relative_dir).resolve(strict=True)
-        if not base.is_dir() or not _is_within(base, root):
+        if (
+            not base.is_dir()
+            or not _is_within(base, root)
+            or _has_skipped_component(base.relative_to(root))
+        ):
             return []
         entries = sorted(base.iterdir(), key=lambda item: item.name)
     except OSError:
@@ -81,7 +89,10 @@ def scan_files(work_dir: str, prefix: str, limit: int = 10) -> list[str]:
             continue
         try:
             resolved = entry.resolve(strict=True)
-            if not _is_within(resolved, root):
+            if (
+                not _is_within(resolved, root)
+                or _has_skipped_component(resolved.relative_to(root))
+            ):
                 continue
             is_directory = resolved.is_dir()
         except OSError:
