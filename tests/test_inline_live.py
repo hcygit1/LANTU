@@ -30,15 +30,24 @@ class FakeRichLive:
         self.start_calls = []
         self.update_calls = []
         self.stop_calls = 0
+        self.start_error = None
+        self.update_error = None
+        self.stop_error = None
 
     def start(self, *, refresh):
         self.start_calls.append(refresh)
+        if self.start_error is not None:
+            raise self.start_error
 
     def update(self, renderable, *, refresh):
         self.update_calls.append((renderable, refresh))
+        if self.update_error is not None:
+            raise self.update_error
 
     def stop(self):
         self.stop_calls += 1
+        if self.stop_error is not None:
+            raise self.stop_error
 
 
 class FakeLiveFactory:
@@ -48,6 +57,20 @@ class FakeLiveFactory:
     def __call__(self, renderable, **kwargs):
         instance = FakeRichLive(renderable, **kwargs)
         self.instances.append(instance)
+        return instance
+
+
+class ConfiguredLiveFactory(FakeLiveFactory):
+    def __init__(self, *configs):
+        super().__init__()
+        self.configs = configs
+
+    def __call__(self, renderable, **kwargs):
+        instance = super().__call__(renderable, **kwargs)
+        config = self.configs[len(self.instances) - 1]
+        instance.start_error = config.get("start_error")
+        instance.update_error = config.get("update_error")
+        instance.stop_error = config.get("stop_error")
         return instance
 
 
@@ -128,6 +151,64 @@ def test_live_renderer_is_lazy_and_stop_is_idempotent():
     assert len(factory.instances) == 2
 
 
+def test_live_renderer_recovers_after_start_and_cleanup_failures():
+    factory = ConfiguredLiveFactory(
+        {
+            "start_error": RuntimeError("start failed"),
+            "stop_error": RuntimeError("cleanup failed"),
+        },
+        {},
+    )
+    renderer = LiveRenderer(object(), live_factory=factory)
+
+    with pytest.raises(RuntimeError, match="start failed"):
+        renderer.update(LiveViewState(assistant_text="失败"))
+
+    assert renderer._live is None
+    assert factory.instances[0].stop_calls == 1
+
+    renderer.update(LiveViewState(assistant_text="恢复"))
+    assert renderer._live is factory.instances[1]
+    assert factory.instances[1].start_calls == [True]
+
+
+def test_live_renderer_recovers_after_existing_live_update_failure():
+    factory = ConfiguredLiveFactory(
+        {"update_error": RuntimeError("update failed")},
+        {},
+    )
+    renderer = LiveRenderer(object(), live_factory=factory)
+    renderer.update(LiveViewState(assistant_text="第一段"))
+
+    with pytest.raises(RuntimeError, match="update failed"):
+        renderer.update(LiveViewState(assistant_text="第二段"))
+
+    assert renderer._live is None
+    assert factory.instances[0].stop_calls == 1
+
+    renderer.update(LiveViewState(assistant_text="第三段"))
+    assert renderer._live is factory.instances[1]
+    assert factory.instances[1].start_calls == [True]
+
+
+def test_live_renderer_recovers_after_stop_failure():
+    factory = ConfiguredLiveFactory(
+        {"stop_error": RuntimeError("stop failed")},
+        {},
+    )
+    renderer = LiveRenderer(object(), live_factory=factory)
+    renderer.update(LiveViewState(assistant_text="第一段"))
+
+    with pytest.raises(RuntimeError, match="stop failed"):
+        renderer.stop()
+
+    assert renderer._live is None
+
+    renderer.update(LiveViewState(assistant_text="第二段"))
+    assert renderer._live is factory.instances[1]
+    assert factory.instances[1].start_calls == [True]
+
+
 @pytest.mark.asyncio
 async def test_tool_use_commits_buffered_assistant_and_starts_running_tool():
     live = FakeLiveRenderer()
@@ -161,6 +242,24 @@ async def test_tool_result_is_committed_once_and_loop_complete_finishes():
     assert handler.last_tool is tool
     assert handler.state.tools == {}
     assert live.stop_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_tool_phase_does_not_restore_completed_thinking():
+    live = FakeLiveRenderer()
+    handler = InlineEventHandler(live, FakeTranscript())
+
+    await handler.handle(ThinkingText("已完成推理"))
+    await handler.handle(ToolUseEvent("ReadFile", "t1", {"file_path": "a.py"}))
+
+    assert handler.state.thinking_text == ""
+    assert live.states[-1].thinking_text == ""
+    update_count = len(live.states)
+
+    await handler.handle(ToolResultEvent("t1", "ReadFile", "ok", False, 0.1))
+
+    assert handler.state.thinking_text == ""
+    assert len(live.states) == update_count
 
 
 @pytest.mark.asyncio
@@ -222,7 +321,7 @@ async def test_static_system_events_stop_live_before_writing_transcript():
 
 
 @pytest.mark.asyncio
-async def test_error_commits_trimmed_assistant_before_error_and_turn_complete_is_noop():
+async def test_error_commits_assistant_and_turn_complete_does_not_repeat_messages():
     events = []
     live = FakeLiveRenderer(events)
     transcript = FakeTranscript(events)
@@ -234,12 +333,58 @@ async def test_error_commits_trimmed_assistant_before_error_and_turn_complete_is
 
     assert transcript.assistant == ["部分回答"]
     assert transcript.errors == ["请求失败"]
-    assert events[-4:] == [
+    assert events[-5:] == [
+        "live.stop",
+        "assistant:部分回答",
+        "live.stop",
+        "error:请求失败",
+        "live.stop",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_error_clears_dynamic_state_without_restarting_live():
+    events = []
+    live = FakeLiveRenderer(events)
+    transcript = FakeTranscript(events)
+    handler = InlineEventHandler(live, transcript)
+
+    await handler.handle(ToolUseEvent("Bash", "t1", {"command": "pwd"}))
+    await handler.handle(ThinkingText("过期推理"))
+    await handler.handle(StreamText("  部分回答  "))
+    events.clear()
+    update_count = len(live.states)
+
+    await handler.handle(ErrorEvent("请求失败"))
+
+    assert transcript.assistant == ["部分回答"]
+    assert transcript.errors == ["请求失败"]
+    assert handler.state.assistant_text == ""
+    assert handler.state.thinking_text == ""
+    assert handler.state.tools == {}
+    assert len(live.states) == update_count
+    assert events == [
         "live.stop",
         "assistant:部分回答",
         "live.stop",
         "error:请求失败",
     ]
+
+
+@pytest.mark.asyncio
+async def test_turn_complete_clears_thinking_and_stops_expired_live():
+    live = FakeLiveRenderer()
+    transcript = FakeTranscript()
+    handler = InlineEventHandler(live, transcript)
+
+    await handler.handle(ThinkingText("本轮推理"))
+    stop_count = live.stop_calls
+
+    await handler.handle(TurnComplete(1))
+
+    assert handler.state.thinking_text == ""
+    assert transcript.assistant == []
+    assert live.stop_calls == stop_count + 1
 
 
 @pytest.mark.asyncio
@@ -249,21 +394,30 @@ async def test_turn_complete_does_not_submit_an_active_assistant_buffer():
     handler = InlineEventHandler(live, transcript)
 
     await handler.handle(StreamText("尚未结束"))
+    await handler.handle(ThinkingText("本轮推理"))
     update_count = len(live.states)
+    stop_count = live.stop_calls
     await handler.handle(TurnComplete(1))
 
     assert transcript.assistant == []
     assert handler.state.assistant_text == "尚未结束"
-    assert len(live.states) == update_count
+    assert handler.state.thinking_text == ""
+    assert live.stop_calls == stop_count + 1
+    assert len(live.states) == update_count + 1
+    assert live.states[-1].assistant_text == "尚未结束"
+    assert live.states[-1].thinking_text == ""
 
 
 @pytest.mark.asyncio
 async def test_permission_requires_handler():
+    events = []
     request = PermissionRequest("Bash", "运行命令", asyncio.get_running_loop().create_future())
-    handler = InlineEventHandler(FakeLiveRenderer(), FakeTranscript())
+    handler = InlineEventHandler(FakeLiveRenderer(events), FakeTranscript(events))
 
     with pytest.raises(RuntimeError, match="Permission handler is not configured"):
         await handler.handle(request)
+
+    assert events == ["live.stop"]
 
 
 @pytest.mark.asyncio
@@ -359,3 +513,16 @@ async def test_finish_commits_assistant_and_clears_dynamic_state():
     assert handler.state.thinking_text == ""
     assert handler.state.tools == {}
     assert live.stop_calls >= 2
+
+
+@pytest.mark.asyncio
+async def test_finish_resets_completed_tool_ids_for_the_next_user_round():
+    transcript = FakeTranscript()
+    handler = InlineEventHandler(FakeLiveRenderer(), transcript)
+    result = ToolResultEvent("shared", "Search", "found", False, 0.3)
+
+    await handler.handle(result)
+    handler.finish()
+    await handler.handle(result)
+
+    assert len(transcript.tools) == 2

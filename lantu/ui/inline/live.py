@@ -21,20 +21,39 @@ class LiveRenderer:
     def update(self, state: LiveViewState) -> None:
         renderable = render_live_state(state)
         if self._live is None:
-            self._live = self.live_factory(
+            candidate = self.live_factory(
                 renderable,
                 console=self.console,
                 refresh_per_second=12,
                 transient=True,
             )
-            self._live.start(refresh=True)
+            try:
+                candidate.start(refresh=True)
+            except Exception:
+                self._best_effort_stop(candidate)
+                raise
+            self._live = candidate
             return
 
-        self._live.update(renderable, refresh=True)
+        live = self._live
+        try:
+            live.update(renderable, refresh=True)
+        except Exception:
+            self._live = None
+            self._best_effort_stop(live)
+            raise
 
     def stop(self) -> None:
         if self._live is None:
             return
 
-        self._live.stop()
+        live = self._live
         self._live = None
+        live.stop()
+
+    @staticmethod
+    def _best_effort_stop(live: Any) -> None:
+        try:
+            live.stop()
+        except Exception:
+            pass

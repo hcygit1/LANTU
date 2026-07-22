@@ -54,6 +54,7 @@ class InlineEventHandler:
             self.state.thinking_text += event.text
         elif isinstance(event, ToolUseEvent):
             self._commit_assistant()
+            self.state.thinking_text = ""
             self._completed_tool_ids.discard(event.tool_id)
             self.state.tools[event.tool_id] = ToolViewState(
                 tool_id=event.tool_id,
@@ -90,17 +91,24 @@ class InlineEventHandler:
             self.transcript.system_message(event.message)
         elif isinstance(event, ErrorEvent):
             self._commit_assistant()
+            self.state.thinking_text = ""
+            self.state.tools.clear()
             self.live.stop()
             self.transcript.error_message(event.message)
+            return
         elif isinstance(event, PermissionRequest):
+            self.live.stop()
             if self.permission_handler is None:
                 raise RuntimeError("Permission handler is not configured")
-            self.live.stop()
             await self.permission_handler(event)
         elif isinstance(event, LoopComplete):
             self.finish()
             return
         elif isinstance(event, TurnComplete):
+            self.state.thinking_text = ""
+            self.live.stop()
+            if self.state.assistant_text:
+                self.live.update(self.state)
             return
         else:
             log.debug("Unknown agent event: %r", event)
@@ -116,4 +124,5 @@ class InlineEventHandler:
         self._commit_assistant()
         self.state.thinking_text = ""
         self.state.tools.clear()
+        self._completed_tool_ids.clear()
         self.live.stop()
