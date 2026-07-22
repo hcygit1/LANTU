@@ -172,6 +172,56 @@ def test_live_renderer_recovers_after_start_and_cleanup_failures():
     assert factory.instances[1].start_calls == [True]
 
 
+def test_live_renderer_cleans_candidate_when_start_is_interrupted():
+    factory = ConfiguredLiveFactory(
+        {"start_error": KeyboardInterrupt("start interrupted")},
+    )
+    renderer = LiveRenderer(object(), live_factory=factory)
+
+    with pytest.raises(KeyboardInterrupt, match="start interrupted"):
+        renderer.update(LiveViewState(assistant_text="失败"))
+
+    assert renderer._live is None
+    assert factory.instances[0].stop_calls == 1
+
+
+def test_live_renderer_recovers_after_existing_live_update_is_interrupted():
+    factory = ConfiguredLiveFactory(
+        {"update_error": KeyboardInterrupt("update interrupted")},
+        {},
+    )
+    renderer = LiveRenderer(object(), live_factory=factory)
+    renderer.update(LiveViewState(assistant_text="第一段"))
+
+    with pytest.raises(KeyboardInterrupt, match="update interrupted"):
+        renderer.update(LiveViewState(assistant_text="第二段"))
+
+    assert renderer._live is None
+    assert factory.instances[0].stop_calls == 1
+
+    renderer.update(LiveViewState(assistant_text="第三段"))
+    assert renderer._live is factory.instances[1]
+    assert factory.instances[1].start_calls == [True]
+
+
+def test_live_renderer_cleanup_interrupt_does_not_replace_original_error():
+    original = RuntimeError("start failed")
+    factory = ConfiguredLiveFactory(
+        {
+            "start_error": original,
+            "stop_error": KeyboardInterrupt("cleanup interrupted"),
+        },
+    )
+    renderer = LiveRenderer(object(), live_factory=factory)
+
+    with pytest.raises(RuntimeError, match="start failed") as captured:
+        renderer.update(LiveViewState(assistant_text="失败"))
+
+    assert captured.value is original
+    assert renderer._live is None
+    assert factory.instances[0].stop_calls == 1
+
+
 def test_live_renderer_recovers_after_existing_live_update_failure():
     factory = ConfiguredLiveFactory(
         {"update_error": RuntimeError("update failed")},

@@ -29,7 +29,7 @@ class LiveRenderer:
             )
             try:
                 candidate.start(refresh=True)
-            except Exception:
+            except BaseException:
                 self._best_effort_stop(candidate)
                 raise
             self._live = candidate
@@ -38,7 +38,7 @@ class LiveRenderer:
         live = self._live
         try:
             live.update(renderable, refresh=True)
-        except Exception:
+        except BaseException:
             self._live = None
             self._best_effort_stop(live)
             raise
@@ -55,5 +55,5 @@ class LiveRenderer:
     def _best_effort_stop(live: Any) -> None:
         try:
             live.stop()
-        except Exception:
+        except BaseException:
             pass
