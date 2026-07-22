@@ -13,6 +13,7 @@ os.environ.pop("NO_COLOR", None)
 
 from lantu.agent import (
     LoopComplete,
+    PermissionRequest,
     StreamText,
     ToolResultEvent,
     ToolUseEvent,
@@ -66,6 +67,17 @@ class FakeAgent:
 
     async def run(self, conversation: ConversationManager):
         prompt = conversation.history[-1].content
+        if prompt == "permission":
+            future = asyncio.get_running_loop().create_future()
+            yield PermissionRequest("Bash", "echo demo", future)
+            await future
+            yield LoopComplete(1)
+            return
+
+        if prompt == "crash":
+            yield StreamText("即将失败")
+            raise RuntimeError("fixture crash")
+
         yield StreamText("正在处理")
         if prompt == "slow":
             await asyncio.sleep(30)
@@ -128,6 +140,7 @@ class FakeRuntime:
 
     async def close(self) -> None:
         self.close_calls += 1
+        print("RUNTIME_CLOSED", flush=True)
 
 
 async def main() -> None:

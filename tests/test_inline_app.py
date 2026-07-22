@@ -312,14 +312,60 @@ async def test_run_sends_prompt_renders_response_and_closes_runtime(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_handle_permission_denies_request(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("choice", "expected_response", "expected_audit"),
+    [
+        ("allow", PermissionResponse.ALLOW, "权限选择: allow"),
+        ("always", PermissionResponse.ALLOW_ALWAYS, "权限选择: always"),
+        ("deny", PermissionResponse.DENY, "权限选择: deny"),
+    ],
+)
+async def test_handle_permission_audits_selection_before_completing_request(
+    tmp_path: Path,
+    choice: str,
+    expected_response: PermissionResponse,
+    expected_audit: str,
+) -> None:
     runtime = FakeRuntime(tmp_path)
-    app = make_app(runtime, prompt=FakePrompt(choices=["deny"]))
+    future = asyncio.get_running_loop().create_future()
+
+    class OrderingTranscript(FakeTranscript):
+        def system_message(self, content: str) -> None:
+            assert not future.done()
+            super().system_message(content)
+
+    transcript = OrderingTranscript()
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(choices=[choice]),
+        transcript=transcript,
+    )
+
+    await app.handle_permission(PermissionRequest("Bash", "rm file", future))
+
+    assert future.result() is expected_response
+    assert transcript.system_messages == [expected_audit]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", [KeyboardInterrupt(), EOFError()])
+async def test_handle_permission_audits_default_deny_after_cancel(
+    tmp_path: Path,
+    interruption: BaseException,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    transcript = FakeTranscript()
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(choices=[interruption]),
+        transcript=transcript,
+    )
     future = asyncio.get_running_loop().create_future()
 
     await app.handle_permission(PermissionRequest("Bash", "rm file", future))
 
     assert future.result() is PermissionResponse.DENY
+    assert transcript.system_messages == ["权限选择: deny"]
 
 
 @pytest.mark.asyncio

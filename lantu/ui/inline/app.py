@@ -350,19 +350,26 @@ class InlineApp:
             render_permission_request(request.tool_name, request.description),
             blank_after=False,
         )
+        selection = "deny"
         response = PermissionResponse.DENY
         try:
             choice = await self.prompt.choose("选择", PERMISSION_CHOICES)
-            response = {
+            responses = {
                 "allow": PermissionResponse.ALLOW,
                 "always": PermissionResponse.ALLOW_ALWAYS,
                 "deny": PermissionResponse.DENY,
-            }.get(choice, PermissionResponse.DENY)
+            }
+            if choice in responses:
+                selection = choice
+                response = responses[choice]
         except (KeyboardInterrupt, EOFError):
             pass
         finally:
-            if not request.future.done():
-                request.future.set_result(response)
+            try:
+                self.transcript.system_message(f"权限选择: {selection}")
+            finally:
+                if not request.future.done():
+                    request.future.set_result(response)
 
     async def handle_ask_user(self, event: AskUserEvent) -> None:
         self.live.stop()

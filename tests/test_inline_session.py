@@ -470,6 +470,7 @@ def test_inline_prompt_session_configures_history_completer_and_bindings(
     assert isinstance(captured["completer"], InlineCompleter)
     assert captured["complete_while_typing"] is True
     assert captured["multiline"] is True
+    assert captured["erase_when_done"] is True
     assert _binding_handler(captured["key_bindings"], Keys.ControlM)
     assert _binding_handler(captured["key_bindings"], Keys.Escape, Keys.ControlM)
 
