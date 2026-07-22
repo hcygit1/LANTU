@@ -9,8 +9,11 @@ MAX_AT_REF_BYTES = 10240
 
 _PATH_SEGMENT_PATTERN = r"\.?[\w-]+(?:\.[\w-]+)*"
 _PATH_SEGMENT_RE = re.compile(_PATH_SEGMENT_PATTERN)
+_AT_REF_TERMINATORS = ".,!?;:)]}>\"'，。！？；：、）】》〉」』〕”’…"
+_AT_REF_BOUNDARY_PATTERN = rf"(?=$|\s|[{re.escape(_AT_REF_TERMINATORS)}])"
 _AT_REF_RE = re.compile(
     rf"@({_PATH_SEGMENT_PATTERN}(?:/{_PATH_SEGMENT_PATTERN})*)"
+    rf"{_AT_REF_BOUNDARY_PATTERN}"
 )
 _SKIP_DIRS = {
     ".git",

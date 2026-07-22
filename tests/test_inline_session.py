@@ -272,6 +272,59 @@ def test_expand_at_refs_preserves_sentence_period(tmp_path: Path) -> None:
     assert expanded.endswith("```.")
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@foo+bar.txt",
+        "@foo@example.com",
+    ],
+)
+def test_expand_at_refs_rejects_unsupported_token_continuation(
+    tmp_path: Path, text: str
+) -> None:
+    (tmp_path / "foo").write_text("must not expand", encoding="utf-8")
+
+    assert expand_at_refs(text, str(tmp_path)) == text
+
+
+@pytest.mark.parametrize(
+    "terminator",
+    [
+        ",",
+        "!",
+        "?",
+        ";",
+        ":",
+        ")",
+        "]",
+        "}",
+        "。",
+        "，",
+        "！",
+        "？",
+        "；",
+        "：",
+        "、",
+        "）",
+        "】",
+        "》",
+        "」",
+        "』",
+        "”",
+        "’",
+    ],
+)
+def test_expand_at_refs_accepts_sentence_punctuation_and_closing_brackets(
+    tmp_path: Path, terminator: str
+) -> None:
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+
+    expanded = expand_at_refs(f"@note.txt{terminator}", str(tmp_path))
+
+    assert "[File: note.txt]" in expanded
+    assert expanded.endswith(f"```{terminator}")
+
+
 def test_expand_at_refs_keeps_missing_and_escaped_references(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-secret.txt"
     outside.write_text("secret", encoding="utf-8")
