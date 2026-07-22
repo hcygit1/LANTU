@@ -12,6 +12,7 @@ import pexpect
 FIXTURE = "tests/fixtures/run_inline_fake.py"
 PYTHON = ".venv/bin/python"
 PROMPT = "❯ ".encode()
+WIDE_WORDMARK = "█▀█ █▄░█ ▀█▀ █░█".encode()
 CURSOR_HIDE = b"\x1b[?25l"
 CURSOR_SHOW = b"\x1b[?25h"
 FORBIDDEN_SEQUENCES = (
@@ -55,25 +56,28 @@ def spawn_inline(
         cwd=os.getcwd(),
         encoding=None,
         timeout=10,
+        dimensions=(rows, cols),
     )
     child.logfile_read = output
-    child.setwinsize(rows, cols)
     try:
         yield child, output
     finally:
-        if child.isalive():
-            child.terminate(force=True)
-        child.close()
+        if not child.closed:
+            if child.isalive():
+                child.terminate(force=True)
+            child.close()
 
 
 def exit_from_prompt(child: pexpect.spawn, command: bytes = b"/exit") -> None:
     child.sendline(command)
     child.expect(pexpect.EOF)
+    child.close()
+    assert child.exitstatus == 0
 
 
 def test_inline_conversation_remains_in_scrollback_without_screen_switches() -> None:
     with spawn_inline(cols=100) as (child, log):
-        child.expect(b"LANTU")
+        child.expect(WIDE_WORDMARK)
         child.expect(PROMPT)
         child.sendline(b"hello")
         child.expect("处理完成".encode())
@@ -97,7 +101,7 @@ def test_inline_conversation_remains_in_scrollback_without_screen_switches() -> 
 
 def test_quit_alias_exits_normally() -> None:
     with spawn_inline() as (child, log):
-        child.expect(b"LANTU")
+        child.expect(WIDE_WORDMARK)
         child.expect(PROMPT)
         exit_from_prompt(child, b"/quit")
 
@@ -119,7 +123,7 @@ def test_narrow_terminal_uses_compact_ascii_header() -> None:
 
 def test_ctrl_c_cancels_active_turn_and_returns_to_prompt() -> None:
     with spawn_inline(cols=100) as (child, log):
-        child.expect(b"LANTU")
+        child.expect(WIDE_WORDMARK)
         child.expect(PROMPT)
         child.sendline(b"slow")
         child.expect("正在处理".encode())
@@ -141,10 +145,13 @@ def test_ctrl_c_cancels_active_turn_and_returns_to_prompt() -> None:
 
 def test_wide_terminal_uses_pixel_wordmark() -> None:
     with spawn_inline(cols=100) as (child, log):
-        child.expect("█▀█ █▄░█ ▀█▀ █░█".encode())
+        child.expect(WIDE_WORDMARK)
         child.expect(PROMPT)
         exit_from_prompt(child)
 
     output = log.getvalue()
-    assert "█▀█ █▄░█ ▀█▀ █░█" in strip_ansi(output)
+    text = strip_ansi(output)
+    assert "█▀█ █▄░█ ▀█▀ █░█" in text
+    assert "┗━━ 0.2.0 · fake-model · default" in text
+    assert "LANTU 0.2.0" not in text
     assert_terminal_restored(output)

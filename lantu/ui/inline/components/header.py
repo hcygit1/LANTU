@@ -41,7 +41,7 @@ def render_header(
     second = Text("┃  █▀█ █░▀█  █  █▄█", style=DEFAULT_THEME.accent)
     third = Text("┗━━ ", style=DEFAULT_THEME.accent)
     third.append(
-        f"LANTU {release} · {safe_model} · {safe_mode}",
+        f"{release} · {safe_model} · {safe_mode}",
         style=DEFAULT_THEME.muted,
     )
     fourth = Text(f"    {path}", style=DEFAULT_THEME.muted, overflow="ellipsis")
