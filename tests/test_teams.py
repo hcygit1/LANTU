@@ -144,6 +144,36 @@ def test_mailbox_cleanup_all_stops_between_files_at_deadline(
 
     assert len(removed) == 1
     assert len(list(tmp_path.iterdir())) == 2
+
+
+@pytest.mark.asyncio
+async def test_bounded_team_delete_completes_normal_external_cleanup(
+    monkeypatch,
+) -> None:
+    from lantu.teams.manager import TeamManager
+
+    manager = TeamManager()
+    team = AgentTeam(name="normal", lead_agent_id="lead")
+    manager._teams[team.name] = team
+    calls: list[str] = []
+
+    class RecordingMailbox:
+        def cleanup_all(self, deadline=None) -> None:
+            calls.append("mailbox")
+
+    manager._mailboxes[team.name] = RecordingMailbox()
+    monkeypatch.setattr(
+        manager,
+        "_remove_dir",
+        lambda *_args, **_kwargs: calls.append("directory"),
+    )
+
+    await manager.delete_team_bounded(
+        team.name, deadline=time.monotonic() + 1
+    )
+
+    assert calls == ["mailbox", "directory"]
+    assert team.name not in manager._teams
 from lantu.tools.base import Tool, ToolResult
 
 # =====================================================================

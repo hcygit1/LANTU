@@ -320,7 +320,11 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
                 if team is not None:
                     for member in team.members:
                         team.set_member_active(member.name, False)
-                runtime.team_manager.delete_team(team_name, deadline=deadline)
+                await runtime.team_manager.delete_team_bounded(
+                    team_name, deadline=deadline
+                )
+            except asyncio.CancelledError as exc:
+                cancellation = exc
             except BaseException:
                 log.exception("Failed to delete team %s", team_name)
     finally:

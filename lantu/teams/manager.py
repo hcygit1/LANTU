@@ -4,11 +4,13 @@
 # 简历模版：jianli.xiaolinnote.com
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from lantu.teams.backend_detect import BackendDetectionError, detect_backend
 from lantu.teams.mailbox import Mailbox, create_message
@@ -225,6 +227,125 @@ class TeamManager:
         self._mailboxes.pop(team_name, None)
 
         log.info("Deleted team '%s'", team_name)
+
+    async def delete_team_bounded(
+        self,
+        team_name: str,
+        deadline: float,
+        timeout: float = 10.0,
+    ) -> None:
+        team = self.get_team(team_name)
+        if team is None:
+            raise TeamError(f"Team '{team_name}' not found")
+
+        mailbox = self._mailboxes.get(team_name)
+        team_dir = resolve_team_dir(team_name)
+        for member in list(team.members):
+            team.set_member_active(member.name, False)
+            AgentNameRegistry.instance().unregister(member.name)
+
+            handle = self._inprocess_handles.pop(member.agent_id, None)
+            if handle and not handle.done:
+                handle.cancel()
+
+            pane_id = self._pane_ids.pop(member.agent_id, None)
+            remaining = self._remaining_timeout(deadline, timeout)
+            if pane_id and remaining > 0:
+                self._kill_pane(
+                    pane_id, member.backend_type, timeout=remaining
+                )
+
+            remaining = self._remaining_timeout(deadline, timeout)
+            if member.worktree_path and remaining > 0:
+                self._cleanup_worktree(
+                    member.worktree_path,
+                    deadline=deadline,
+                    timeout=remaining,
+                )
+
+            self._teammate_team_map.pop(member.agent_id, None)
+            if self._trace_manager:
+                self._trace_manager.remove(member.agent_id)
+
+        self._teams.pop(team_name, None)
+        self._task_stores.pop(team_name, None)
+        self._mailboxes.pop(team_name, None)
+
+        remaining = self._remaining_timeout(deadline, timeout)
+        if mailbox is not None and remaining > 0:
+            await self._run_daemon_cleanup(
+                lambda: mailbox.cleanup_all(deadline=deadline),
+                remaining,
+                f"mailbox cleanup for team '{team_name}'",
+            )
+
+        remaining = self._remaining_timeout(deadline, timeout)
+        if remaining > 0:
+            await self._run_daemon_cleanup(
+                lambda: self._remove_dir(team_dir, deadline=deadline),
+                remaining,
+                f"directory cleanup for team '{team_name}'",
+            )
+        else:
+            log.warning(
+                "Team '%s' directory cleanup skipped: deadline exhausted",
+                team_name,
+            )
+
+        log.info("Deleted team '%s'", team_name)
+
+    async def _run_daemon_cleanup(
+        self,
+        operation: Callable[[], None],
+        timeout: float,
+        description: str,
+    ) -> bool:
+        if timeout <= 0:
+            return False
+        loop = asyncio.get_running_loop()
+        completed: asyncio.Future[None] = loop.create_future()
+
+        def report(error: BaseException | None) -> None:
+            def finish() -> None:
+                if completed.done():
+                    return
+                if error is None:
+                    completed.set_result(None)
+                else:
+                    completed.set_exception(error)
+
+            try:
+                if not loop.is_closed():
+                    loop.call_soon_threadsafe(finish)
+            except RuntimeError:
+                pass
+
+        def worker() -> None:
+            try:
+                operation()
+            except BaseException as exc:
+                report(exc)
+            else:
+                report(None)
+
+        threading.Thread(
+            target=worker,
+            name=f"lantu-{description}",
+            daemon=True,
+        ).start()
+        try:
+            await asyncio.wait_for(asyncio.shield(completed), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            completed.cancel()
+            log.warning("%s exceeded shutdown deadline", description)
+            return False
+        except asyncio.CancelledError:
+            completed.cancel()
+            raise
+        except BaseException:
+            log.warning("%s failed", description, exc_info=True)
+            return False
 
     def list_teams(self) -> list[str]:
         return list(self._teams.keys())

@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,7 @@ from lantu.tools.glob import Params as GlobParams
 from lantu.tools.grep import Params as GrepParams
 from lantu.tools.read_file import Params as ReadFileParams
 from lantu.tools.write_file import Params as WriteFileParams
+from lantu.teams.models import AgentTeam
 from lantu.worktree.models import WorktreeSession
 
 
@@ -509,6 +511,58 @@ async def test_close_uses_one_total_deadline_for_all_async_cleanup(
     finally:
         release.set()
         await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_close_detaches_blocking_mailbox_cleanup_at_deadline(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+    team = AgentTeam(name="blocked", lead_agent_id="lead")
+    runtime.team_manager._teams[team.name] = team
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    directory_calls: list[str] = []
+
+    class BlockingMailbox:
+        def cleanup_all(self, deadline=None) -> None:
+            started.set()
+            release.wait()
+            finished.set()
+
+    runtime.team_manager._mailboxes[team.name] = BlockingMailbox()
+    monkeypatch.setattr(
+        runtime.team_manager,
+        "_remove_dir",
+        lambda *_args, **_kwargs: directory_calls.append("remove"),
+    )
+    monkeypatch.setattr(lifecycle, "RUNTIME_CLOSE_TIMEOUT", 0.01)
+    began = time.monotonic()
+    watchdog = threading.Timer(0.15, release.set)
+    watchdog.daemon = True
+    watchdog.start()
+
+    await asyncio.wait_for(runtime.close(), timeout=0.4)
+
+    try:
+        assert time.monotonic() - began < 0.1
+        assert started.is_set()
+        assert runtime.session._file.closed
+        assert directory_calls == []
+    finally:
+        watchdog.cancel()
+        release.set()
+        for _ in range(100):
+            if finished.is_set():
+                break
+            await asyncio.sleep(0.001)
+        assert finished.is_set()
 
 
 @pytest.mark.asyncio
