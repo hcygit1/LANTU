@@ -20,7 +20,7 @@ async def handle_clear(ctx: CommandContext) -> None:
         # 用新 session ID 重建 file history
         if ctx.agent:
             from lantu.filehistory import FileHistory
-            file_history = FileHistory(ctx.agent._work_dir, new_session.session_id)
+            file_history = FileHistory(ctx.agent.work_dir, new_session.session_id)
             ctx.agent.file_history = file_history
             for tool in ctx.agent.registry.list_tools():
                 if hasattr(tool, "file_history"):
@@ -47,4 +47,3 @@ CLEAR_COMMAND = Command(
     type=CommandType.LOCAL_UI,
     handler=handle_clear,
 )
-
