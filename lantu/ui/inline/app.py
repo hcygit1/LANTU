@@ -85,6 +85,7 @@ class InlineApp:
         self._pre_plan_mode = self.agent.permission_mode
         self._mcp_injected = False
         self._agent_task: asyncio.Task[None] | None = None
+        self._turn_cancel_requested = False
         self._processing_notifications = False
         self._has_exited_plan_mode = False
         self._command_config: dict[str, Any] = {}
@@ -103,14 +104,14 @@ class InlineApp:
         return f"{mode} · {self.model} · {tokens}"
 
     async def run(self) -> None:
-        self.transcript.header(
-            self.model,
-            self.agent.permission_mode.value,
-            self.agent.work_dir,
-        )
-        self._drain_startup_messages()
-
         try:
+            self.transcript.header(
+                self.model,
+                self.agent.permission_mode.value,
+                self.agent.work_dir,
+            )
+            self._drain_startup_messages()
+
             while self.running:
                 try:
                     if self.pending_prompts:
@@ -136,8 +137,10 @@ class InlineApp:
                     continue
                 await self.run_prompt_interruptible(text)
         finally:
-            self.live.stop()
-            await self.runtime.close()
+            try:
+                self.live.stop()
+            finally:
+                await self.runtime.close()
 
     async def run_prompt_interruptible(self, text: str) -> None:
         loop = asyncio.get_running_loop()
@@ -157,6 +160,8 @@ class InlineApp:
         finally:
             if self._agent_task is task:
                 self._agent_task = None
+            if task is not None and task.done():
+                self._turn_cancel_requested = False
             if signal_installed:
                 loop.remove_signal_handler(signal.SIGINT)
                 with suppress(OSError, RuntimeError, ValueError):
@@ -165,7 +170,9 @@ class InlineApp:
     def interrupt_active_turn(self) -> None:
         task = self._agent_task
         if task is not None and not task.done():
-            task.cancel()
+            self._turn_cancel_requested = True
+            if not task.cancel():
+                self._turn_cancel_requested = False
 
     async def run_prompt(self, text: str, is_notification: bool = False) -> None:
         self.confirm_exit = False
@@ -173,6 +180,7 @@ class InlineApp:
         seen_messages: dict[int, Message] = {}
         agent_started = False
         finished = False
+        external_cancel = False
         try:
             self.runtime.refresh_skills_if_needed()
             await self.runtime.wait_until_ready()
@@ -230,7 +238,12 @@ class InlineApp:
             if not finished:
                 self.events.finish()
                 finished = True
-            self.transcript.system_message("Operation cancelled")
+            if self._turn_cancel_requested:
+                self._turn_cancel_requested = False
+                self.transcript.system_message("Operation cancelled")
+            else:
+                external_cancel = True
+                raise
         except LLMError as exc:
             if not finished:
                 self.events.finish()
@@ -245,7 +258,7 @@ class InlineApp:
                 self.agent.total_input_tokens + self.agent.total_output_tokens
             )
             await self._cleanup_memory_prefetch(prefetch_task)
-            if not is_notification:
+            if not is_notification and not external_cancel:
                 await self.process_task_notifications()
 
     async def _cleanup_memory_prefetch(
@@ -283,6 +296,7 @@ class InlineApp:
 
         self._processing_notifications = True
         try:
+            history_boundary = len(self.runtime.conversation.history)
             completed = self.runtime.task_manager.poll_completed()
             if completed:
                 inject_task_notifications(self.runtime.conversation, completed)
@@ -300,6 +314,8 @@ class InlineApp:
                 self.runtime.conversation.add_system_reminder(note)
 
             if completed or notes:
+                for message in self.runtime.conversation.history[history_boundary:]:
+                    self.runtime.session.append(message)
                 await self.run_prompt("", is_notification=True)
         finally:
             self._processing_notifications = False
@@ -370,18 +386,23 @@ class InlineApp:
 
         try:
             choice = await self.prompt.choose("计划", PLAN_CHOICES)
-        except (asyncio.CancelledError, KeyboardInterrupt, EOFError):
-            choice = "manual"
+        except asyncio.CancelledError:
+            raise
+        except (KeyboardInterrupt, EOFError):
+            self.transcript.system_message("计划审批已取消")
+            return
 
         if choice == "feedback":
             try:
                 feedback = await self.prompt.ask_text("修改意见")
-            except (asyncio.CancelledError, KeyboardInterrupt, EOFError):
-                choice = "manual"
-            else:
-                if feedback:
-                    self.pending_prompts.append(feedback)
+            except asyncio.CancelledError:
+                raise
+            except (KeyboardInterrupt, EOFError):
+                self.transcript.system_message("计划审批已取消")
                 return
+            if feedback:
+                self.pending_prompts.append(feedback)
+            return
 
         if choice == "yolo":
             self.agent.set_permission_mode(PermissionMode.BYPASS)
@@ -437,6 +458,17 @@ class InlineApp:
     def _set_session(self, session: Any) -> None:
         self.runtime.session = session
         self.agent.session_id = session.session_id
+        recall_task = self.agent.memory_recall_task
+        if recall_task is not None and not recall_task.done():
+            recall_task.cancel()
+        baseline_tokens = session.meta.total_tokens
+        self.agent.total_input_tokens = baseline_tokens
+        self.agent.total_output_tokens = 0
+        self.agent._loop_count = 0
+        self.agent.memory_recall_task = None
+        self.agent._memory_recall_consumed = True
+        self.events.state.input_tokens = baseline_tokens
+        self.events.state.output_tokens = 0
         file_history = FileHistory(self.agent.work_dir, session.session_id)
         self.runtime.file_history = file_history
         self.agent.file_history = file_history

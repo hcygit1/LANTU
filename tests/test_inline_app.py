@@ -324,14 +324,50 @@ async def test_handle_permission_denies_request(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_interrupt_active_turn_only_cancels_agent_task(tmp_path: Path) -> None:
-    app = make_app(FakeRuntime(tmp_path))
-    app._agent_task = asyncio.create_task(asyncio.sleep(60))
+    runtime = FakeRuntime(tmp_path)
+    started = asyncio.Event()
+
+    async def slow_run(conversation: ConversationManager):
+        started.set()
+        await asyncio.Event().wait()
+        yield
+
+    runtime.agent.run = slow_run  # type: ignore[method-assign]
+    transcript = FakeTranscript()
+    app = make_app(runtime, transcript=transcript)
+    turn = asyncio.create_task(app.run_prompt_interruptible("slow"))
+    await started.wait()
 
     app.interrupt_active_turn()
 
-    with pytest.raises(asyncio.CancelledError):
-        await app._agent_task
+    await turn
     assert app.running is True
+    assert app._turn_cancel_requested is False
+    assert transcript.system_messages[-1] == "Operation cancelled"
+
+
+@pytest.mark.asyncio
+async def test_external_run_cancellation_propagates_and_closes_runtime(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    started = asyncio.Event()
+
+    async def slow_run(conversation: ConversationManager):
+        started.set()
+        await asyncio.Event().wait()
+        yield
+
+    runtime.agent.run = slow_run  # type: ignore[method-assign]
+    app = make_app(runtime, prompt=FakePrompt(prompts=["slow"]))
+    run_task = asyncio.create_task(app.run())
+    await started.wait()
+
+    run_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_task
+    assert runtime.closed is True
 
 
 def test_interaction_renderables_are_sanitized_and_have_explicit_labels() -> None:
@@ -600,7 +636,7 @@ def test_session_update_total_tokens_is_saved_to_meta(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancelled_run_prompt_returns_to_input_loop(tmp_path: Path) -> None:
+async def test_unmarked_agent_cancellation_propagates(tmp_path: Path) -> None:
     runtime = FakeRuntime(tmp_path)
 
     async def cancelled_run(conversation: ConversationManager):
@@ -611,14 +647,15 @@ async def test_cancelled_run_prompt_returns_to_input_loop(tmp_path: Path) -> Non
     transcript = FakeTranscript()
     app = make_app(runtime, transcript=transcript)
 
-    await app.run_prompt("cancel me")
+    with pytest.raises(asyncio.CancelledError):
+        await app.run_prompt("cancel me")
 
-    assert transcript.system_messages[-1] == "Operation cancelled"
+    assert "Operation cancelled" not in transcript.system_messages
     assert app.running is True
 
 
 @pytest.mark.asyncio
-async def test_cancelled_runtime_readiness_returns_to_input_loop(tmp_path: Path) -> None:
+async def test_unmarked_runtime_readiness_cancellation_propagates(tmp_path: Path) -> None:
     runtime = FakeRuntime(tmp_path)
 
     async def cancelled_wait() -> None:
@@ -628,9 +665,10 @@ async def test_cancelled_runtime_readiness_returns_to_input_loop(tmp_path: Path)
     transcript = FakeTranscript()
     app = make_app(runtime, transcript=transcript)
 
-    await app.run_prompt("cancel before agent")
+    with pytest.raises(asyncio.CancelledError):
+        await app.run_prompt("cancel before agent")
 
-    assert transcript.system_messages[-1] == "Operation cancelled"
+    assert "Operation cancelled" not in transcript.system_messages
     assert runtime.agent.run_count == 0
 
 
@@ -905,17 +943,56 @@ async def test_plan_path_oserror_returns_to_input_loop(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_plan_prompt_cancellation_is_consumed_as_manual_approval(
+async def test_plan_async_cancellation_propagates_without_approval(
     tmp_path: Path,
 ) -> None:
     runtime = FakeRuntime(tmp_path)
     app = make_app(runtime, prompt=FakePrompt(choices=[asyncio.CancelledError()]))
     app.set_plan_mode(True)
 
+    with pytest.raises(asyncio.CancelledError):
+        await app.handle_plan_approval()
+
+    assert runtime.agent.permission_mode is PermissionMode.PLAN
+    assert list(app.pending_prompts) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [KeyboardInterrupt(), EOFError()])
+async def test_plan_terminal_cancellation_keeps_plan_mode(
+    tmp_path: Path,
+    error: BaseException,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    transcript = FakeTranscript()
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(choices=[error]),
+        transcript=transcript,
+    )
+    app.set_plan_mode(True)
+
     await app.handle_plan_approval()
 
-    assert runtime.agent.permission_mode is PermissionMode.DEFAULT
-    assert len(app.pending_prompts) == 1
+    assert runtime.agent.permission_mode is PermissionMode.PLAN
+    assert list(app.pending_prompts) == []
+    assert transcript.system_messages[-1] == "计划审批已取消"
+
+
+@pytest.mark.asyncio
+async def test_plan_feedback_async_cancellation_propagates(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(choices=["feedback"], texts=[asyncio.CancelledError()]),
+    )
+    app.set_plan_mode(True)
+
+    with pytest.raises(asyncio.CancelledError):
+        await app.handle_plan_approval()
+
+    assert runtime.agent.permission_mode is PermissionMode.PLAN
+    assert list(app.pending_prompts) == []
 
 
 @pytest.mark.asyncio
@@ -982,6 +1059,55 @@ async def test_mailbox_notification_triggers_follow_up_when_agent_does_not_drain
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("include_task", "mailbox_notes", "expected_fragments"),
+    [
+        (True, [], ["<task-notification>"]),
+        (False, ["mailbox context"], ["mailbox context"]),
+        (True, ["mailbox context"], ["<task-notification>", "mailbox context"]),
+    ],
+)
+async def test_notifications_are_persisted_once_with_follow_up_reply(
+    tmp_path: Path,
+    include_task: bool,
+    mailbox_notes: list[str],
+    expected_fragments: list[str],
+) -> None:
+    task = SimpleNamespace(
+        id="task-persist",
+        name="worker",
+        status="completed",
+        result="task context",
+        start_time=0.0,
+        end_time=1.0,
+        progress=SimpleNamespace(input_tokens=0, output_tokens=0),
+    )
+    runtime = FakeRuntime(
+        tmp_path,
+        [[StreamText("notification reply"), LoopComplete(1)]],
+    )
+    runtime.task_manager = FakeTaskManager([([task] if include_task else [])])
+    runtime.team_manager = FakeTeamManager([mailbox_notes])
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    runtime.session_manager = manager
+    runtime.session = session
+    app = make_app(runtime)
+
+    await app.process_task_notifications()
+    session_id = session.session_id
+    session.close()
+    resumed = manager.resume(session_id)
+
+    assert resumed is not None
+    persisted_content = [message.content for message in resumed.messages]
+    for fragment in expected_fragments:
+        assert sum(fragment in content for content in persisted_content) == 1
+    assert persisted_content[-1] == "notification reply"
+    resumed.session.close()
+
+
+@pytest.mark.asyncio
 async def test_command_context_syncs_runtime_references_and_restores_messages(
     tmp_path: Path,
 ) -> None:
@@ -1007,6 +1133,55 @@ async def test_command_context_syncs_runtime_references_and_restores_messages(
     assert runtime.conversation is new_conversation
     assert transcript.user_messages == ["question"]
     assert transcript.assistant_messages == ["answer"]
+
+
+@pytest.mark.asyncio
+async def test_set_new_session_clears_agent_and_event_token_state(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    app = make_app(runtime)
+    runtime.agent.total_input_tokens = 80
+    runtime.agent.total_output_tokens = 20
+    runtime.agent._loop_count = 4
+    recall_task = asyncio.create_task(asyncio.sleep(60))
+    runtime.agent.memory_recall_task = recall_task
+    runtime.agent._memory_recall_consumed = False
+    app.events.state.input_tokens = 80
+    app.events.state.output_tokens = 20
+    new_session = FakeSession("new-session")
+
+    app.build_command_context("").config["set_session"](new_session)
+    await asyncio.sleep(0)
+
+    assert runtime.agent.total_input_tokens == 0
+    assert runtime.agent.total_output_tokens == 0
+    assert runtime.agent._loop_count == 0
+    assert runtime.agent.memory_recall_task is None
+    assert runtime.agent._memory_recall_consumed is True
+    assert recall_task.cancelled() is True
+    assert app.events.state.input_tokens == 0
+    assert app.events.state.output_tokens == 0
+
+
+@pytest.mark.asyncio
+async def test_resumed_session_tokens_become_next_turn_baseline(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    app = make_app(runtime)
+    resumed_session = FakeSession("resumed-session")
+    resumed_session.meta.total_tokens = 120
+    app.build_command_context("").config["set_session"](resumed_session)
+
+    async def one_more_turn(conversation: ConversationManager):
+        runtime.agent.total_input_tokens += 8
+        runtime.agent.total_output_tokens += 2
+        yield LoopComplete(1)
+
+    runtime.agent.run = one_more_turn  # type: ignore[method-assign]
+
+    await app.run_prompt("")
+
+    assert runtime.agent.total_input_tokens == 128
+    assert runtime.agent.total_output_tokens == 2
+    assert resumed_session.meta.total_tokens == 130
 
 
 @pytest.mark.asyncio
@@ -1110,3 +1285,41 @@ async def test_close_cancellation_stops_live_and_propagates(tmp_path: Path) -> N
         await app.run()
 
     assert live.stop_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_closes_runtime_when_live_stop_fails(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+
+    class FailingLive(FakeLive):
+        def stop(self) -> None:
+            super().stop()
+            raise RuntimeError("live stop failed")
+
+    app = make_app(
+        runtime,
+        prompt=FakePrompt(prompts=[EOFError()]),
+        live=FailingLive(),
+    )
+
+    with pytest.raises(RuntimeError, match="live stop failed"):
+        await app.run()
+
+    assert runtime.closed is True
+
+
+@pytest.mark.asyncio
+async def test_run_closes_runtime_when_header_fails(tmp_path: Path) -> None:
+    runtime = FakeRuntime(tmp_path)
+    transcript = FakeTranscript()
+
+    def broken_header(model: str, mode: str, work_dir: str) -> None:
+        raise BrokenPipeError("closed output")
+
+    transcript.header = broken_header  # type: ignore[method-assign]
+    app = make_app(runtime, transcript=transcript)
+
+    with pytest.raises(BrokenPipeError, match="closed output"):
+        await app.run()
+
+    assert runtime.closed is True
