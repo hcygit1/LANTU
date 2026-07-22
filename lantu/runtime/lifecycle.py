@@ -16,6 +16,8 @@ from lantu.runtime.models import InteractiveRuntime
 
 log = logging.getLogger(__name__)
 
+BACKGROUND_TASK_CANCEL_TIMEOUT = 0.25
+
 
 def _render_skill_catalog(catalog: list[tuple[str, str]]) -> str:
     if not catalog:
@@ -121,11 +123,22 @@ async def prefetch_runtime_memories(
 
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
     try:
-        task.exception()
+        exception = task.exception()
     except asyncio.CancelledError:
         return
     except BaseException:
         log.exception("Background runtime task failed")
+        return
+    if exception is not None:
+        log.error(
+            "Background runtime task failed",
+            exc_info=(type(exception), exception, exception.__traceback__),
+        )
+
+
+def _cancel_task_once(task: asyncio.Task[Any]) -> None:
+    if not task.done() and task.cancelling() == 0:
+        task.cancel()
 
 
 def track_background_task(
@@ -194,24 +207,26 @@ async def _run_cleanup_tasks(
     awaitables: list[Awaitable[Any]], timeout: float
 ) -> None:
     tasks = [asyncio.create_task(awaitable) for awaitable in awaitables]
-    if not tasks:
+    await _wait_for_tasks_bounded(tasks, timeout)
+
+
+async def _wait_for_tasks_bounded(
+    tasks: list[asyncio.Task[Any]] | set[asyncio.Task[Any]], timeout: float
+) -> None:
+    pending = set(tasks)
+    if not pending:
         return
     try:
-        done, pending = await asyncio.wait(tasks, timeout=timeout)
-        for task in pending:
-            task.cancel()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        for task in done:
-            try:
-                task.result()
-            except BaseException:
-                log.exception("Runtime cleanup operation failed")
+        done, pending = await asyncio.wait(pending, timeout=timeout)
     except BaseException:
-        for task in tasks:
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        done = {task for task in pending if task.done()}
+        pending = {task for task in pending if not task.done()}
+
+    for task in done:
+        _consume_task_result(task)
+    for task in pending:
+        _cancel_task_once(task)
+        task.add_done_callback(_consume_task_result)
 
 
 async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
@@ -225,13 +240,11 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
         managed_tasks.add(runtime.mcp_task)
     managed_tasks.discard(current)
     for task in managed_tasks:
-        if not task.done():
-            task.cancel()
-    if managed_tasks:
-        try:
-            await asyncio.gather(*managed_tasks, return_exceptions=True)
-        except BaseException:
-            pass
+        _cancel_task_once(task)
+        task.add_done_callback(runtime.background_tasks.discard)
+    await _wait_for_tasks_bounded(
+        managed_tasks, timeout=BACKGROUND_TASK_CANCEL_TIMEOUT
+    )
 
     cleanup: list[Awaitable[Any]] = [
         runtime.agent._extract_memories(runtime.conversation)

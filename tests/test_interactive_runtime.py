@@ -4,6 +4,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import AsyncIterator
@@ -303,13 +304,14 @@ async def test_close_still_closes_session_when_close_task_is_cancelled(
         AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
     )
     cancelling = asyncio.Event()
+    release = asyncio.Event()
 
     async def slow_to_cancel() -> None:
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             cancelling.set()
-            await asyncio.sleep(1)
+            await release.wait()
 
     background = asyncio.create_task(slow_to_cancel())
     runtime.background_tasks.add(background)
@@ -317,9 +319,129 @@ async def test_close_still_closes_session_when_close_task_is_cancelled(
     await cancelling.wait()
     close_task.cancel()
 
-    await close_task
+    try:
+        await close_task
+        assert runtime.session._file.closed
+        assert not background.done()
+    finally:
+        release.set()
+        await asyncio.gather(background, return_exceptions=True)
 
-    assert runtime.session._file.closed
+
+@pytest.mark.asyncio
+async def test_cleanup_timeout_does_not_wait_for_stubborn_cancelled_task() -> None:
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+    task_refs: list[asyncio.Task[None]] = []
+
+    async def stubborn_cleanup() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        task_refs.append(task)
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+
+    started = time.monotonic()
+    await asyncio.wait_for(
+        lifecycle._run_cleanup_tasks([stubborn_cleanup()], timeout=0.01),
+        timeout=0.2,
+    )
+    await asyncio.sleep(0)
+
+    try:
+        assert time.monotonic() - started < 0.1
+        assert cancelled.is_set()
+        assert not task_refs[0].done()
+    finally:
+        release.set()
+        await asyncio.gather(*task_refs, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_cleanup_wait_detaches_unfinished_task() -> None:
+    release = asyncio.Event()
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    task_refs: list[asyncio.Task[None]] = []
+
+    async def stubborn_cleanup() -> None:
+        task = asyncio.current_task()
+        assert task is not None
+        task_refs.append(task)
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+
+    cleanup_wait = asyncio.create_task(
+        lifecycle._run_cleanup_tasks([stubborn_cleanup()], timeout=10)
+    )
+    await started.wait()
+    cleanup_wait.cancel()
+
+    await asyncio.wait_for(cleanup_wait, timeout=0.1)
+    await asyncio.sleep(0)
+
+    try:
+        assert cancelled.is_set()
+        assert not task_refs[0].done()
+    finally:
+        release.set()
+        await asyncio.gather(*task_refs, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_consumes_ordinary_task_exception(caplog) -> None:
+    async def fails() -> None:
+        raise RuntimeError("cleanup failed")
+
+    await lifecycle._run_cleanup_tasks([fails()], timeout=0.1)
+
+    assert "Background runtime task failed" in caplog.text
+    assert "cleanup failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_close_does_not_wait_for_stubborn_background_task(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider]), provider, PermissionMode.DEFAULT, None, tmp_path
+    )
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def stubborn_background() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+
+    background = asyncio.create_task(stubborn_background())
+    runtime.background_tasks.add(background)
+    await asyncio.sleep(0)
+    monkeypatch.setattr(lifecycle, "BACKGROUND_TASK_CANCEL_TIMEOUT", 0.01)
+    started = time.monotonic()
+
+    await asyncio.wait_for(runtime.close(), timeout=0.2)
+
+    try:
+        assert time.monotonic() - started < 0.1
+        assert cancelled.is_set()
+        assert not background.done()
+        assert runtime.session._file.closed
+    finally:
+        release.set()
+        await asyncio.gather(background, return_exceptions=True)
 
 
 @pytest.mark.asyncio
