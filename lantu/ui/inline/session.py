@@ -96,6 +96,7 @@ class InlinePromptSession:
             complete_while_typing=True,
             multiline=True,
             key_bindings=bindings,
+            erase_when_done=True,
         )
 
     async def prompt(self, status: str) -> str:
