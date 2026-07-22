@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import json
 import os
 import shutil
@@ -232,6 +233,68 @@ async def test_bounded_team_delete_keeps_blocking_cleanup_off_event_loop(
 
     assert started.is_set()
     assert heartbeat_at[0] < 0.08
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_kind", ["pane", "worktree"])
+async def test_bounded_team_delete_binds_cleanup_to_each_member(
+    monkeypatch: pytest.MonkeyPatch,
+    cleanup_kind: str,
+) -> None:
+    from lantu.teams.manager import TeamManager
+
+    manager = TeamManager()
+    team = AgentTeam(name="binding", lead_agent_id="lead")
+    for index in range(2):
+        member = TeammateInfo(
+            name=f"worker-{index}",
+            agent_id=f"agent-{index}",
+            agent_type="general",
+            model="test",
+            worktree_path=(
+                f"/tmp/worktree-{index}"
+                if cleanup_kind == "worktree"
+                else ""
+            ),
+            backend_type=BackendType.TMUX.value,
+            is_active=False,
+        )
+        team.members.append(member)
+        if cleanup_kind == "pane":
+            manager._pane_ids[member.agent_id] = f"pane-{index}"
+    manager._teams[team.name] = team
+    delayed: list[Callable[[], None]] = []
+    cleaned: list[str] = []
+
+    async def capture(operation, _timeout, description):
+        if "teammate" in description:
+            delayed.append(operation)
+        return False
+
+    monkeypatch.setattr(manager, "_run_daemon_cleanup", capture)
+    monkeypatch.setattr(
+        manager,
+        "_kill_pane",
+        lambda pane_id, *_args, **_kwargs: cleaned.append(pane_id),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_cleanup_worktree",
+        lambda path, **_kwargs: cleaned.append(path),
+    )
+
+    await manager.delete_team_bounded(
+        team.name, deadline=time.monotonic() + 1
+    )
+    for operation in delayed:
+        operation()
+
+    expected = (
+        ["pane-0", "pane-1"]
+        if cleanup_kind == "pane"
+        else ["/tmp/worktree-0", "/tmp/worktree-1"]
+    )
+    assert cleaned == expected
 from lantu.tools.base import Tool, ToolResult
 
 # =====================================================================

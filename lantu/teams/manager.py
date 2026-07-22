@@ -252,8 +252,12 @@ class TeamManager:
             remaining = self._remaining_timeout(deadline, timeout)
             if pane_id and remaining > 0:
                 await self._run_daemon_cleanup(
-                    lambda: self._kill_pane(
-                        pane_id, member.backend_type, timeout=remaining
+                    lambda pane_id=pane_id,
+                    backend_type=member.backend_type,
+                    cleanup_timeout=remaining: self._kill_pane(
+                        pane_id,
+                        backend_type,
+                        timeout=cleanup_timeout,
                     ),
                     remaining,
                     f"pane cleanup for teammate '{member.name}'",
@@ -262,10 +266,12 @@ class TeamManager:
             remaining = self._remaining_timeout(deadline, timeout)
             if member.worktree_path and remaining > 0:
                 await self._run_daemon_cleanup(
-                    lambda: self._cleanup_worktree(
-                        member.worktree_path,
-                        deadline=deadline,
-                        timeout=remaining,
+                    lambda worktree_path=member.worktree_path,
+                    cleanup_deadline=deadline,
+                    cleanup_timeout=remaining: self._cleanup_worktree(
+                        worktree_path,
+                        deadline=cleanup_deadline,
+                        timeout=cleanup_timeout,
                     ),
                     remaining,
                     f"worktree cleanup for teammate '{member.name}'",
