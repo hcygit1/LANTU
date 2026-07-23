@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
@@ -39,6 +40,17 @@ ANTHROPIC_MODEL_FETCH_TIMEOUT = 3.0
 
 
 _EPHEMERAL = {"type": "ephemeral"}
+
+
+def _normalize_no_proxy_for_httpx() -> None:
+    """Normalize the IPv6 loopback CIDR that httpx cannot parse."""
+    for name in ("NO_PROXY", "no_proxy"):
+        value = os.environ.get(name)
+        if not value:
+            continue
+        entries = ["::1" if item.strip() == "::1/128" else item.strip()
+                   for item in value.split(",")]
+        os.environ[name] = ",".join(entries)
 
 
 def _mark_last_user_tail_for_cache(messages: list[dict[str, Any]]) -> None:
@@ -170,6 +182,7 @@ class AnthropicClient(LLMClient):
                 "Anthropic API key not found. "
                 "Set it in .lantu/config.yaml or via ANTHROPIC_API_KEY env var."
             )
+        _normalize_no_proxy_for_httpx()
         self._client = AsyncAnthropic(api_key=api_key, base_url=config.base_url)
 
     def set_max_output_tokens(self, tokens: int) -> None:
@@ -365,6 +378,7 @@ class OpenAIClient(LLMClient):
                 "OpenAI API key not found. "
                 "Set it in .lantu/config.yaml or via OPENAI_API_KEY env var."
             )
+        _normalize_no_proxy_for_httpx()
         self._client = AsyncOpenAI(api_key=api_key, base_url=config.base_url)
 
     def set_max_output_tokens(self, tokens: int) -> None:
@@ -498,6 +512,7 @@ class OpenAICompatClient(LLMClient):
                 "OpenAI-compatible API key not found. "
                 "Set it in .lantu/config.yaml or via OPENAI_API_KEY env var."
             )
+        _normalize_no_proxy_for_httpx()
         self._client = AsyncOpenAI(api_key=api_key, base_url=config.base_url)
 
     def set_max_output_tokens(self, tokens: int) -> None:
