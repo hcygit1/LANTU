@@ -335,6 +335,20 @@ async def close_interactive_runtime(runtime: InteractiveRuntime) -> None:
             except BaseException:
                 log.exception("Failed to delete team %s", team_name)
     finally:
+        if runtime.capture_process is not None:
+            runtime.capture_process.stop()
+            failure = runtime.capture_process.failure()
+            if failure:
+                from lantu.memory.session import ExecutionEvent
+
+                runtime.session.record(
+                    ExecutionEvent(
+                        "error.occurred",
+                        {"phase": "capture", "message": failure},
+                    )
+                )
+                log.error("Capture write failed: %s", failure)
+            runtime.capture_process = None
         try:
             runtime.session.close()
         except BaseException:

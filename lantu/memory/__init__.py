@@ -17,15 +17,12 @@ from lantu.memory.recall import (
     render_reminder,
 )
 from lantu.memory.session import (
+    ExecutionEvent,
     ResumeResult,
     Session,
     SessionManager,
     SessionMeta,
-    SessionRecord,
     generate_session_summary,
-    make_compact_boundary,
-    parse_compact_boundary,
-    validate_message_chain,
 )
 
 
@@ -34,11 +31,11 @@ __all__ = [
     "MemoryFile",
     "MemoryManager",
     "RelevantMemory",
+    "ExecutionEvent",
     "ResumeResult",
     "Session",
     "SessionManager",
     "SessionMeta",
-    "SessionRecord",
     "build_memory_prompt",
     "ensure_memory_dir_exists",
     "find_relevant_memories",
@@ -47,11 +44,8 @@ __all__ = [
     "get_user_auto_mem_path",
     "is_auto_mem_path",
     "load_instructions",
-    "make_compact_boundary",
-    "parse_compact_boundary",
     "parse_frontmatter",
     "process_includes",
     "render_reminder",
-    "validate_message_chain",
 ]
 

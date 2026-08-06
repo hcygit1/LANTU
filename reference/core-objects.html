@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LANTU 三个核心对象</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <h1>LANTU 三个核心对象</h1>
+  <table>
+    <thead><tr><th>对象</th><th>职责</th><th>不负责</th></tr></thead>
+    <tbody>
+      <tr><td><code>ConversationManager</code></td><td>保存消息、工具结果和 token 用量状态</td><td>调用模型、执行工具</td></tr>
+      <tr><td><code>LLMClient</code></td><td>把统一请求转换为供应商 API，并流式返回事件</td><td>决定何时调用工具</td></tr>
+      <tr><td><code>Agent</code></td><td>组织循环、调用 Client、执行工具并更新 Conversation</td><td>实现具体供应商协议</td></tr>
+    </tbody>
+  </table>
+  <div class="flow">
+    <div><code>ConversationManager</code> 提供当前上下文</div>
+    <div><code>Agent</code> 调用 <code>LLMClient.stream()</code></div>
+    <div><code>LLMClient</code> 返回文本或工具调用事件</div>
+    <div><code>Agent</code> 执行工具，将结果写回 Conversation，再决定是否继续</div>
+  </div>
+</body>
+</html>

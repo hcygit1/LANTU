@@ -14,10 +14,16 @@ dependencies = [
     "websockets>=14.0",
     "rich>=13.9.0",
     "prompt-toolkit>=3.0.48",
+    "filelock>=3.16.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
 ]
 
 [project.scripts]
 lantu = "lantu.__main__:main"
+
+[project.optional-dependencies]
+capture = ["mitmproxy>=11.0.2"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["lantu"]

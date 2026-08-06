@@ -309,6 +309,7 @@ class Agent:
         instructions_content: str = "",
         memory_manager: MemoryManager | None = None,
         hook_engine: HookEngine | None = None,
+        session: Any | None = None,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -332,6 +333,7 @@ class Agent:
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
         self.hook_engine = hook_engine
+        self.session = session
         self._loop_count = 0
         # 记忆提取合并策略（对齐 Go 版 inProgress + pendingContext）：
         # _extracting: 标记是否有提取正在进行
@@ -554,11 +556,52 @@ class Agent:
                 yield ErrorEvent(message=compact_result)
 
             collector = StreamCollector()
-            llm_stream = self.client.stream(conversation, system=system, tools=tools)
-            async for event in collector.consume(llm_stream):
-                yield event
+            model_call_id = uuid.uuid4().hex
+            model_started = time.monotonic()
+            self._record_model_event(
+                "model.request.started",
+                model_call_id,
+                {"provider": self.protocol, "model": getattr(self.client, "model", "")},
+            )
+            try:
+                from lantu.client import model_call_context
+
+                session_id = self.session.session_id if self.session is not None else None
+                with model_call_context(model_call_id, session_id):
+                    llm_stream = self.client.stream(conversation, system=system, tools=tools)
+                    async for event in collector.consume(llm_stream):
+                        yield event
+            except asyncio.CancelledError:
+                self._record_model_event(
+                    "model.request.interrupted",
+                    model_call_id,
+                    {
+                        "reason": "cancelled",
+                        "result_known": False,
+                        "elapsed_ms": int((time.monotonic() - model_started) * 1000),
+                    },
+                )
+                raise
+            except Exception as exc:
+                self._record_model_event(
+                    "model.request.failed",
+                    model_call_id,
+                    {
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                        "elapsed_ms": int((time.monotonic() - model_started) * 1000),
+                    },
+                )
+                raise
 
             response = collector.response
+            self._record_model_event(
+                "model.request.completed",
+                model_call_id,
+                {
+                    "response_id": getattr(response, "response_id", None),
+                    "elapsed_ms": int((time.monotonic() - model_started) * 1000),
+                },
+            )
 
             if self.hook_engine:
                 ctx = self._build_hook_context("post_receive", message=response.text)
@@ -826,24 +869,29 @@ class Agent:
     ) -> _ToolExecResult:
         tool = self.registry.get(tc.tool_name)
         start = time.monotonic()
+        self._record_tool_started(tc)
 
         if tool is None:
-            return _ToolExecResult(
+            result = _ToolExecResult(
                 tool_id=tc.tool_id,
                 tool_name=tc.tool_name,
                 result=ToolResult(output=f"Error: unknown tool '{tc.tool_name}'", is_error=True),
                 elapsed=time.monotonic() - start,
                 is_unknown=True,
             )
+            self._record_tool_finished(tc, result.result, result.elapsed)
+            return result
 
         if not self.registry.is_enabled(tc.tool_name):
-            return _ToolExecResult(
+            result = _ToolExecResult(
                 tool_id=tc.tool_id,
                 tool_name=tc.tool_name,
                 result=ToolResult(output=f"Error: tool '{tc.tool_name}' is disabled", is_error=True),
                 elapsed=time.monotonic() - start,
                 is_unknown=False,
             )
+            self._record_tool_finished(tc, result.result, result.elapsed)
+            return result
 
         try:
             params = tool.params_model.model_validate(tc.arguments)
@@ -855,13 +903,15 @@ class Agent:
 
         self._snapshot_for_recovery(tc, result)
 
-        return _ToolExecResult(
+        tool_result = _ToolExecResult(
             tool_id=tc.tool_id,
             tool_name=tc.tool_name,
             result=result,
             elapsed=time.monotonic() - start,
             is_unknown=False,
         )
+        self._record_tool_finished(tc, tool_result.result, tool_result.elapsed)
+        return tool_result
 
 
     async def _execute_batch_parallel(
@@ -876,6 +926,7 @@ class Agent:
         tool = self.registry.get(tc.tool_name)
         start = time.monotonic()
         is_unknown = False
+        self._record_tool_started(tc)
 
         if tool is None:
             result = ToolResult(
@@ -883,6 +934,7 @@ class Agent:
             )
             is_unknown = True
             elapsed = time.monotonic() - start
+            self._record_tool_finished(tc, result, elapsed)
             yield result, elapsed, is_unknown
             return
 
@@ -892,12 +944,14 @@ class Agent:
                 is_error=True,
             )
             elapsed = time.monotonic() - start
+            self._record_tool_finished(tc, result, elapsed)
             yield result, elapsed, is_unknown
             return
 
         # 权限检查
         if self.permission_checker:
             decision = self.permission_checker.check(tool, tc.arguments)
+            self._record_permission_decision(tc, decision.effect, decision.reason)
 
             if decision.effect == "deny":
                 result = ToolResult(
@@ -905,6 +959,7 @@ class Agent:
                     is_error=True,
                 )
                 elapsed = time.monotonic() - start
+                self._record_tool_finished(tc, result, elapsed)
                 yield result, elapsed, is_unknown
                 return
 
@@ -919,6 +974,9 @@ class Agent:
                     future=future,
                 )
                 response = await future
+                self._record_permission_decision(
+                    tc, response.value, "user_response"
+                )
 
                 if response == PermissionResponse.DENY:
                     result = ToolResult(
@@ -926,6 +984,7 @@ class Agent:
                         is_error=True,
                     )
                     elapsed = time.monotonic() - start
+                    self._record_tool_finished(tc, result, elapsed)
                     yield result, elapsed, is_unknown
                     return
 
@@ -954,7 +1013,83 @@ class Agent:
         self._snapshot_for_recovery(tc, result)
 
         elapsed = time.monotonic() - start
+        self._record_tool_finished(tc, result, elapsed)
         yield result, elapsed, is_unknown
+
+    def _record_model_event(
+        self, event_type: str, model_call_id: str, payload: dict[str, Any]
+    ) -> None:
+        if self.session is None:
+            return
+        from lantu.memory.session import ExecutionEvent
+
+        self.session.record(
+            ExecutionEvent(
+                event_type,
+                {"model_call_id": model_call_id, **payload},
+            )
+        )
+
+    def _record_tool_started(self, tc: ToolCallComplete) -> None:
+        if self.session is None:
+            return
+        from lantu.memory.session import ExecutionEvent
+
+        self.session.record(
+            ExecutionEvent(
+                "tool.started",
+                {
+                    "tool_call_id": tc.tool_id,
+                    "tool_name": tc.tool_name,
+                    "arguments": tc.arguments,
+                },
+            )
+        )
+
+    def _record_permission_decision(
+        self, tc: ToolCallComplete, decision: str, reason: str = ""
+    ) -> None:
+        if self.session is None:
+            return
+        from lantu.memory.session import ExecutionEvent
+
+        self.session.record(
+            ExecutionEvent(
+                "permission.decided",
+                {
+                    "tool_call_id": tc.tool_id,
+                    "tool_name": tc.tool_name,
+                    "decision": decision,
+                    "reason": reason,
+                },
+            )
+        )
+
+    def _record_tool_finished(
+        self, tc: ToolCallComplete, result: ToolResult, elapsed: float
+    ) -> None:
+        if self.session is None:
+            return
+        from lantu.memory.session import ExecutionEvent
+
+        if result.is_error:
+            event_type = "tool.failed"
+            payload: dict[str, Any] = {
+                "tool_call_id": tc.tool_id,
+                "tool_name": tc.tool_name,
+                "error": {"type": "tool_error", "message": result.output},
+                "output": result.output,
+                "elapsed_ms": int(elapsed * 1000),
+            }
+        else:
+            event_type = "tool.completed"
+            payload = {
+                "tool_call_id": tc.tool_id,
+                "tool_name": tc.tool_name,
+                "output": result.output,
+                "elapsed_ms": int(elapsed * 1000),
+            }
+        self.session.record(ExecutionEvent(event_type, payload))
 
     def _snapshot_for_recovery(
         self, tc: ToolCallComplete, result: ToolResult
@@ -1137,13 +1272,70 @@ class Agent:
                 append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
-            llm_stream = self.client.stream(conversation, system=system, tools=tools)
-            async for _event in collector.consume(llm_stream):
-                pass
+            model_call_id = uuid.uuid4().hex
+            model_started = time.monotonic()
+            self._record_model_event(
+                "model.request.started",
+                model_call_id,
+                {"provider": self.protocol, "model": getattr(self.client, "model", "")},
+            )
+            try:
+                from lantu.client import model_call_context
+
+                session_id = self.session.session_id if self.session is not None else None
+                with model_call_context(model_call_id, session_id):
+                    llm_stream = self.client.stream(conversation, system=system, tools=tools)
+                    async for _event in collector.consume(llm_stream):
+                        pass
+            except asyncio.CancelledError:
+                self._record_model_event(
+                    "model.request.interrupted",
+                    model_call_id,
+                    {
+                        "reason": "cancelled",
+                        "result_known": False,
+                        "elapsed_ms": int((time.monotonic() - model_started) * 1000),
+                    },
+                )
+                raise
+            except Exception as exc:
+                self._record_model_event(
+                    "model.request.failed",
+                    model_call_id,
+                    {
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                        "elapsed_ms": int((time.monotonic() - model_started) * 1000),
+                    },
+                )
+                raise
 
             response = collector.response
+            self._record_model_event(
+                "model.request.completed",
+                model_call_id,
+                {
+                    "response_id": getattr(response, "response_id", None),
+                    "elapsed_ms": int((time.monotonic() - model_started) * 1000),
+                },
+            )
             self.total_input_tokens += response.input_tokens
             self.total_output_tokens += response.output_tokens
+            if self.session is not None:
+                from lantu.memory.session import ExecutionEvent
+
+                self.session.record(
+                    ExecutionEvent(
+                        "usage.recorded",
+                        {
+                            "provider": self.protocol,
+                            "model": getattr(self.client, "model", ""),
+                            "input_tokens": response.input_tokens,
+                            "output_tokens": response.output_tokens,
+                            "cache_read_tokens": response.cache_read,
+                            "cache_creation_tokens": response.cache_creation,
+                        },
+                    )
+                )
 
             if event_callback:
                 event_callback({
@@ -1222,17 +1414,26 @@ class Agent:
     async def _execute_tool_noninteractive(
         self, tc: ToolCallComplete
     ) -> ToolResult:
+        started = time.monotonic()
+        self._record_tool_started(tc)
+
+        def finish(result: ToolResult) -> ToolResult:
+            self._record_tool_finished(tc, result, time.monotonic() - started)
+            return result
+
         tool = self.registry.get(tc.tool_name)
 
         if tool is None:
-            return ToolResult(
-                output=f"Error: unknown tool '{tc.tool_name}'", is_error=True
+            return finish(
+                ToolResult(output=f"Error: unknown tool '{tc.tool_name}'", is_error=True)
             )
 
         if not self.registry.is_enabled(tc.tool_name):
-            return ToolResult(
-                output=f"Error: tool '{tc.tool_name}' is disabled",
-                is_error=True,
+            return finish(
+                ToolResult(
+                    output=f"Error: tool '{tc.tool_name}' is disabled",
+                    is_error=True,
+                )
             )
 
         if self.hook_engine:
@@ -1245,25 +1446,36 @@ class Agent:
             )
             rejection = await self.hook_engine.run_pre_tool_hooks(hook_ctx)
             if rejection is not None:
-                return ToolResult(
-                    output=f"Hook rejected: {rejection.reason}",
-                    is_error=True,
+                return finish(
+                    ToolResult(
+                        output=f"Hook rejected: {rejection.reason}",
+                        is_error=True,
+                    )
                 )
 
         if self.permission_checker:
             decision = self.permission_checker.check(tool, tc.arguments)
+            self._record_permission_decision(tc, decision.effect, decision.reason)
             if decision.effect == "deny":
-                return ToolResult(
-                    output=f"Permission denied: {decision.reason}",
-                    is_error=True,
+                return finish(
+                    ToolResult(
+                        output=f"Permission denied: {decision.reason}",
+                        is_error=True,
+                    )
                 )
             if decision.effect == "ask":
                 if self.permission_mode == PermissionMode.BYPASS:
+                    self._record_permission_decision(tc, "allow", "bypass mode")
                     pass  # BYPASS 模式自动批准
                 else:
-                    return ToolResult(
-                        output="Permission denied: non-interactive agent cannot prompt user",
-                        is_error=True,
+                    self._record_permission_decision(
+                        tc, "deny", "non-interactive agent cannot prompt user"
+                    )
+                    return finish(
+                        ToolResult(
+                            output="Permission denied: non-interactive agent cannot prompt user",
+                            is_error=True,
+                        )
                     )
 
         try:
@@ -1278,6 +1490,8 @@ class Agent:
                 output=f"Tool execution error: {e}", is_error=True
             )
 
+        self._snapshot_for_recovery(tc, result)
+
         if self.hook_engine:
             file_path = self._infer_file_path(tc.arguments)
             hook_ctx = self._build_hook_context(
@@ -1288,7 +1502,7 @@ class Agent:
             )
             await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
 
-        return result
+        return finish(result)
 
     def _maybe_persist_or_truncate(self, tool_use_id: str, text: str) -> str:
         from lantu.context.manager import (

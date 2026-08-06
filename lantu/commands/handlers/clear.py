@@ -6,10 +6,12 @@ from lantu.conversation import ConversationManager
 
 async def handle_clear(ctx: CommandContext) -> None:
     if ctx.session:
+        ctx.session.stop_runtime("session_switch")
         ctx.session.close()
 
     if ctx.session_manager:
         new_session = ctx.session_manager.create()
+        new_session.start_runtime("new")
         ctx.config["set_session"](new_session)
 
         # 用新 session ID 重建 file history

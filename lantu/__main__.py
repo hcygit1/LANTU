@@ -16,6 +16,34 @@ from lantu.permissions import PermissionMode
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lantu", description="Lantu AI coding assistant")
+    subparsers = parser.add_subparsers(dest="command")
+    lens_parser = subparsers.add_parser("lens", help="Read-only Session Journal inspection")
+    lens_parser.add_argument(
+        "action",
+        choices=[
+            "list", "events", "search", "tasks", "actions", "diagnose",
+            "annotate", "compare", "export", "replay", "evidence", "web",
+        ],
+        nargs="?",
+        default="list",
+    )
+    lens_parser.add_argument("session_id", nargs="?")
+    lens_parser.add_argument("query", nargs="?")
+    lens_parser.add_argument("--json", action="store_true", dest="json_output")
+    lens_parser.add_argument("--kind", choices=["task_boundary", "diagnosis", "dataset_label"])
+    lens_parser.add_argument("--target")
+    lens_parser.add_argument("--value", help="Annotation value as a JSON object")
+    lens_parser.add_argument(
+        "--unsafe-no-redact",
+        action="store_true",
+        help="Export raw sensitive values (not recommended)",
+    )
+    lens_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="Explicitly send an isolated replay request",
+    )
+    lens_parser.add_argument("--port", type=int, default=18889)
     parser.add_argument(
         "--mode",
         choices=[m.value for m in PermissionMode],
@@ -45,7 +73,171 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use the legacy fullscreen Textual interface",
     )
+    parser.add_argument("--capture", action="store_true", help="Capture model HTTP traffic")
+    parser.add_argument("--capture-port", type=int, default=7788)
     return parser
+
+
+def run_lens(
+    action: str,
+    session_id: str | None,
+    json_output: bool = False,
+    query: str | None = None,
+    annotation_kind: str | None = None,
+    annotation_target: str | None = None,
+    annotation_value: str | None = None,
+    unsafe_no_redact: bool = False,
+    execute_replay: bool = False,
+    web_port: int = 18889,
+) -> None:
+    from dataclasses import asdict
+
+    from lantu.tools.lens import LensReader
+
+    reader = LensReader(os.getcwd())
+    if action == "list":
+        for item in reader.session_ids():
+            print(item)
+        return
+    if action == "web":
+        from lantu.tools.lens import run_lens_web
+
+        run_lens_web(os.getcwd(), web_port)
+        return
+    if action == "annotate":
+        from lantu.tools.lens import AnnotationStore
+
+        if not all((session_id, annotation_kind, annotation_target, annotation_value)):
+            raise SystemExit(
+                "Usage: lantu lens annotate <session_id> --kind <kind> "
+                "--target <id> --value <json>"
+            )
+        try:
+            value = json.loads(annotation_value)
+        except json.JSONDecodeError as exc:
+            raise SystemExit(f"Invalid annotation JSON: {exc}") from exc
+        if not isinstance(value, dict):
+            raise SystemExit("Annotation value must be a JSON object")
+        annotation = AnnotationStore(os.getcwd()).add(
+            session_id, annotation_kind, annotation_target, value
+        )
+        print(json.dumps(asdict(annotation), ensure_ascii=False))
+        return
+    if action == "compare":
+        if not session_id or not query:
+            raise SystemExit("Usage: lantu lens compare <left_session_id> <right_session_id>")
+        comparison = reader.compare(session_id, query)
+        if json_output:
+            print(json.dumps(asdict(comparison), ensure_ascii=False))
+        else:
+            print(f"Compare: {comparison.left.session_id} -> {comparison.right.session_id}")
+            for key, delta in comparison.deltas.items():
+                if delta:
+                    print(f"{key}: {delta:+d}")
+        return
+    if action == "export":
+        if not session_id or not query:
+            raise SystemExit("Usage: lantu lens export <session_id> <output.jsonl>")
+        count = reader.export_dataset(
+            session_id, query, redact_sensitive=not unsafe_no_redact
+        )
+        print(f"Exported {count} task(s) to {query}")
+        return
+    if action == "replay":
+        if not session_id or not query:
+            raise SystemExit("Usage: lantu lens replay <session_id> <task_id>")
+        if not execute_replay:
+            plan = reader.replay_plan(session_id, query)
+            print(json.dumps(asdict(plan), ensure_ascii=False, indent=2))
+            return
+        config = load_config()
+        captures = reader.evidence_links(session_id)
+        plan = reader.replay_plan(session_id, query)
+        call_ids = {str(item.get("model_call_id", "")) for item in plan.model_calls}
+        exact = next(
+            (link.capture for link in captures if link.confidence == "exact" and link.model_call_id in call_ids),
+            None,
+        )
+        if exact is None:
+            raise SystemExit("Replay requires exact capture evidence for this Task")
+        provider = next(
+            (item for item in config.providers if item.model == exact.model),
+            config.providers[0],
+        )
+        api_key = provider.resolve_api_key()
+        if not api_key:
+            raise SystemExit("Replay provider API key is unavailable")
+        result = reader.execute_replay(session_id, query, api_key)
+        print(json.dumps(asdict(result), ensure_ascii=False))
+        return
+    if action == "evidence":
+        if not session_id:
+            raise SystemExit("Usage: lantu lens evidence <session_id> [--json]")
+        for link in reader.evidence_links(session_id):
+            if json_output:
+                print(json.dumps(asdict(link), ensure_ascii=False))
+            else:
+                print(
+                    f"model_call_id={link.model_call_id} "
+                    f"journal_sequence={link.journal_sequence} confidence={link.confidence}"
+                )
+        return
+    if action == "diagnose":
+        if not session_id:
+            raise SystemExit("Usage: lantu lens diagnose <session_id> [--json]")
+        report = reader.report(session_id)
+        if json_output:
+            print(json.dumps(report.to_dict(), ensure_ascii=False))
+        else:
+            print(report.render_text())
+        return
+    if action == "tasks":
+        if not session_id:
+            raise SystemExit("Usage: lantu lens tasks <session_id> [--json]")
+        tasks = reader.tasks(session_id)
+        for task in tasks:
+            if json_output:
+                print(json.dumps(asdict(task), ensure_ascii=False))
+            else:
+                print(
+                    f"{task.task_id} sequences={task.start_sequence}-{task.end_sequence} "
+                    f"events={len(task.events)}"
+                )
+        return
+    if action == "actions":
+        if not session_id:
+            raise SystemExit("Usage: lantu lens actions <session_id> [--json]")
+        for task, graph in zip(reader.tasks(session_id), reader.action_graphs(session_id)):
+            for node in graph.nodes:
+                if json_output:
+                    print(
+                        json.dumps(
+                            {"task_id": task.task_id, **asdict(node)}, ensure_ascii=False
+                        )
+                    )
+                else:
+                    print(
+                        f"{task.task_id} {node.kind} {node.status} "
+                        f"sequences={node.start_sequence}-{node.end_sequence} "
+                        f"id={node.action_id}"
+                    )
+        return
+    if not session_id:
+        if action == "search" and query:
+            events = reader.search(query)
+        else:
+            raise SystemExit("Usage: lantu lens events <session_id> [--json]")
+    elif action == "search":
+        if not query:
+            raise SystemExit("Usage: lantu lens search [session_id] <query> [--json]")
+        events = reader.search(query, session_id)
+    else:
+        events = ((session_id, event) for event in reader.read(session_id))
+    for current_id, event in events:
+        if json_output:
+            print(json.dumps({"session_id": current_id, **asdict(event)}, ensure_ascii=False))
+        else:
+            print(f"{current_id} {event.sequence:04d} {event.timestamp} {event.type}")
 
 
 def run_tui(config, permission_mode, hook_engine) -> None:
@@ -109,6 +301,25 @@ def _main() -> None:
 
     args = build_parser().parse_args()
 
+    if args.command == "lens":
+        run_lens(
+            args.action,
+            args.session_id,
+            args.json_output,
+            args.query,
+            args.kind,
+            args.target,
+            args.value,
+            args.unsafe_no_redact,
+            args.execute,
+            args.port,
+        )
+        return
+
+    if args.capture:
+        os.environ["LANTU_CAPTURE_ENABLED"] = "1"
+        os.environ["LANTU_CAPTURE_PORT"] = str(args.capture_port)
+
     try:
         config = load_config()
     except ConfigError as e:
@@ -162,9 +373,31 @@ def main() -> None:
 
 async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_format: str = "text") -> None:
     from lantu.client import create_client
+    from lantu.memory import SessionManager
+    from lantu.tools.lens.capture_runtime import CaptureProxy, CaptureUnavailable
 
     provider = config.providers[0]
-    client = create_client(provider)
+    session = SessionManager(os.getcwd()).create()
+    session.start_runtime("new")
+    capture = None
+    if os.environ.get("LANTU_CAPTURE_ENABLED") == "1":
+        capture = CaptureProxy(
+            os.getcwd(),
+            int(os.environ.get("LANTU_CAPTURE_PORT", "7788")),
+            session.session_id,
+        )
+        try:
+            capture.start()
+        except CaptureUnavailable as exc:
+            session.close()
+            raise SystemExit(f"Capture error: {exc}") from exc
+    try:
+        client = create_client(provider)
+    except BaseException:
+        session.close()
+        if capture is not None:
+            capture.stop()
+        raise
     try:
         await _run_prompt_with_client(
             config,
@@ -174,9 +407,26 @@ async def _run_prompt(config, permission_mode, hook_engine, prompt: str, output_
             output_format,
             provider,
             client,
+            session,
         )
     finally:
-        await client.aclose()
+        try:
+            await client.aclose()
+        finally:
+            if capture is not None:
+                capture.stop()
+                failure = capture.failure()
+                if failure:
+                    from lantu.memory.session import ExecutionEvent
+
+                    session.record(
+                        ExecutionEvent(
+                            "error.occurred",
+                            {"phase": "capture", "message": failure},
+                        )
+                    )
+                    print(f"Capture warning: {failure}", file=sys.stderr)
+            session.close()
 
 
 async def _run_prompt_with_client(
@@ -187,6 +437,7 @@ async def _run_prompt_with_client(
     output_format: str,
     provider,
     client,
+    session,
 ) -> None:
     from lantu.agent import (
         Agent,
@@ -261,6 +512,7 @@ async def _run_prompt_with_client(
         context_window=provider.get_context_window(),
         instructions_content=instructions,
         hook_engine=hook_engine,
+        session=session,
     )
 
     wt_cfg = config.worktree or WorktreeConfig()
@@ -313,6 +565,38 @@ async def _run_prompt_with_client(
     # 使用事件驱动的 agent.run()，支持 text 和 stream-json 两种输出格式
     conv = ConversationManager()
     conv.add_user_message(prompt)
+    session.start_turn("user")
+    session.commit_message(conv.history[0])
+    history_cursor = len(conv.history)
+    turn_open = True
+
+    async def recorded_events():
+        nonlocal history_cursor, turn_open
+        try:
+            async for event in agent.run(conv):
+                if isinstance(event, CompactNotification) and event.boundary is not None:
+                    session.context_compacted(
+                        event.boundary.summary,
+                        event.boundary.keep,
+                    )
+                    history_cursor = len(conv.history)
+                elif isinstance(event, TurnComplete):
+                    for message in conv.history[history_cursor:]:
+                        session.commit_message(message)
+                    history_cursor = len(conv.history)
+                elif isinstance(event, LoopComplete):
+                    for message in conv.history[history_cursor:]:
+                        session.commit_message(message)
+                    history_cursor = len(conv.history)
+                    session.complete_turn(event.total_turns)
+                    turn_open = False
+                yield event
+        finally:
+            for message in conv.history[history_cursor:]:
+                session.commit_message(message)
+            if turn_open:
+                session.interrupt_turn("agent_error")
+                turn_open = False
 
     start = time.monotonic()
     text_buf = ""
@@ -320,7 +604,8 @@ async def _run_prompt_with_client(
     total_output = 0
     tool_calls: list[dict] = []
 
-    async for event in agent.run(conv):
+    event_stream = recorded_events()
+    async for event in event_stream:
         if isinstance(event, StreamText):
             text_buf += event.text
             if is_json:
@@ -405,6 +690,8 @@ async def _run_prompt_with_client(
         elif isinstance(event, PermissionRequest):
             # -p 非交互模式：自动批准所有权限请求
             event.future.set_result(PermissionResponse.ALLOW)
+
+    await event_stream.aclose()
 
     # 如果有 team 在运行，轮询等待 teammate 完成
     if not team_manager._teams:

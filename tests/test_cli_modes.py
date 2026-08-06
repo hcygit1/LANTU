@@ -79,6 +79,12 @@ def test_tui_flag_is_available() -> None:
     assert args.tui is True
 
 
+def test_capture_flags_are_available() -> None:
+    args = build_parser().parse_args(["--capture", "--capture-port", "8899"])
+    assert args.capture is True
+    assert args.capture_port == 8899
+
+
 def test_parser_keeps_existing_options() -> None:
     args = build_parser().parse_args(
         [
@@ -230,17 +236,17 @@ async def test_run_prompt_closes_client_after_normal_completion(monkeypatch) -> 
         config, PermissionMode.DEFAULT, None, "hello", "stream-json"
     )
 
-    assert calls == [
-        (
-            config,
-            PermissionMode.DEFAULT,
-            None,
-            "hello",
-            "stream-json",
-            config.providers[0],
-            client,
-        )
-    ]
+    assert len(calls) == 1
+    assert calls[0][:-1] == (
+        config,
+        PermissionMode.DEFAULT,
+        None,
+        "hello",
+        "stream-json",
+        config.providers[0],
+        client,
+    )
+    assert calls[0][-1].session_id.startswith("session_")
     assert client.close_calls == 1
 
 

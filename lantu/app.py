@@ -56,7 +56,6 @@ from lantu.memory import (
     find_relevant_memories,
     generate_session_summary,
     load_instructions,
-    make_compact_boundary,
     render_reminder,
 )
 from lantu.permissions import (
@@ -687,8 +686,8 @@ class LantuApp(App):
         self._instructions_content = load_instructions(work_dir)
         self.memory_manager = MemoryManager(work_dir)
         self.session_manager = SessionManager(work_dir)
-        self.session_manager.cleanup()
         self.session = self.session_manager.create()
+        self.session.start_runtime("new")
 
         from lantu.filehistory import FileHistory
         self.file_history = FileHistory(work_dir, self.session.session_id)
@@ -723,6 +722,7 @@ class LantuApp(App):
             instructions_content=self._instructions_content,
             memory_manager=self.memory_manager,
             hook_engine=self.hook_engine,
+            session=self.session,
         )
         self.agent.file_history = self.file_history
         self.agent.session_id = self.session.session_id
@@ -1001,11 +1001,10 @@ class LantuApp(App):
         """
         if not self.session or notification.boundary is None:
             return
-        record = make_compact_boundary(
+        self.session.context_compacted(
             notification.boundary.summary,
             notification.boundary.keep,
         )
-        self.session.append_record(record)
 
     def _set_conversation(self, conv: ConversationManager) -> None:
         self.conversation = conv
@@ -1243,6 +1242,12 @@ class LantuApp(App):
             self._show_system_message("Waiting for MCP servers to connect...")
             await self._mcp_init_task
 
+        turn_open = False
+        interruption_reason = "agent_error"
+        if self.session:
+            self.session.start_turn("notification" if is_notification else "user")
+            turn_open = True
+
         self._streaming = True
         chat = self.query_one("#chat-area", VerticalScroll)
         input_widget = self.query_one("#chat-input", ChatInput)
@@ -1453,6 +1458,8 @@ class LantuApp(App):
                         asyncio.ensure_future(
                             self._update_session_summary()
                         )
+                        self.session.complete_turn(event.total_turns)
+                        turn_open = False
                     if self.agent.plan_mode:
                         asyncio.ensure_future(
                             self._show_plan_approval()
@@ -1469,6 +1476,7 @@ class LantuApp(App):
             self.call_after_refresh(chat.scroll_end, animate=False)
 
         except asyncio.CancelledError:
+            interruption_reason = "user_cancelled"
             if accumulated_text:
                 if streaming_label is not None:
                     await streaming_label.remove()
@@ -1479,8 +1487,11 @@ class LantuApp(App):
                 await ai_row.mount(md)
             self._show_system_message("Operation cancelled")
         except LLMError as e:
+            interruption_reason = "model_error"
             self._show_error(str(e))
         finally:
+            if turn_open and self.session:
+                self.session.interrupt_turn(interruption_reason)
             self._finish_streaming()
             input_widget.focus()
 

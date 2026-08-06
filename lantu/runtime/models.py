@@ -58,6 +58,7 @@ class InteractiveRuntime:
     mcp_task: asyncio.Task[None] | None = None
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)
     startup_messages: list[str] = field(default_factory=list)
+    capture_process: Any = None
     _closed: bool = False
 
     def refresh_skills_if_needed(self) -> None:

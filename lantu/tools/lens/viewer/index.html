@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>LANTU Lens</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><strong>LANTU Lens</strong><span class="muted">Session diagnostics</span></div>
+    <label class="search"><input id="search" placeholder="Search Journal" autocomplete="off"></label>
+  </header>
+  <main class="layout">
+    <aside class="sidebar"><h2>Sessions</h2><div id="sessions" class="session-list"></div></aside>
+    <section class="content">
+      <div id="empty" class="empty">Select a Session to inspect its Journal.</div>
+      <div id="details" hidden>
+        <div class="title-row"><div><h1 id="session-title"></h1><p id="status" class="muted"></p></div></div>
+        <nav class="tabs"><button data-tab="events" class="active">Events</button><button data-tab="tasks">Tasks</button><button data-tab="diagnosis">Diagnosis</button><button data-tab="evidence">Evidence</button></nav>
+        <div id="panel"></div>
+      </div>
+      <div id="search-results" hidden><h2>Search results</h2><div id="results"></div></div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

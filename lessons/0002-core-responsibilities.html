@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>第 2 课：三个核心对象</title>
+  <link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+  <h1>第 2 课：三个核心对象</h1>
+  <p class="lede">完成后，你能根据故障现象判断先查哪个模块。预计 10 分钟。</p>
+
+  <h2>只记三句话</h2>
+  <div class="flow">
+    <div><code>ConversationManager</code> 是记录本：保存消息、工具结果和 token 状态。</div>
+    <div><code>LLMClient</code> 是协议适配器：连接 Anthropic、OpenAI 或兼容 API，并流式返回统一事件。</div>
+    <div><code>Agent</code> 是调度循环：读取对话、请求模型、执行工具、写回结果，直到完成。</div>
+  </div>
+
+  <h2>它们如何配合</h2>
+  <pre><code>ConversationManager
+        ↓ 当前消息
+Agent → LLMClient → 模型 API
+  ↑         ↓ 文本 / 工具调用事件
+  └── 执行工具并把结果写回 Conversation</code></pre>
+  <p>关键边界：<code>LLMClient</code> 不执行工具；<code>ConversationManager</code> 不控制循环；<code>Agent</code> 不关心供应商 API 的具体格式。</p>
+
+  <h2>情景判断</h2>
+  <div class="task">
+    <p><strong>问题：</strong>模型已经要求调用工具，但工具结果没有加入下一轮消息。你应该首先检查哪个对象？</p>
+    <div class="choices">
+      <button type="button" onclick="answer('conversation')">ConversationManager</button>
+      <button type="button" onclick="answer('client')">LLMClient</button>
+      <button type="button" onclick="answer('agent')">Agent</button>
+    </div>
+    <p id="result" class="result" aria-live="polite"></p>
+  </div>
+
+  <h2>源码证据</h2>
+  <ul>
+    <li><a href="../lantu/conversation.py"><code>conversation.py</code></a>：查看 <code>add_tool_results_message()</code></li>
+    <li><a href="../lantu/client.py"><code>client.py</code></a>：查看抽象方法 <code>LLMClient.stream()</code></li>
+    <li><a href="../lantu/agent.py"><code>agent.py</code></a>：查看 <code>Agent.run()</code> 的循环</li>
+    <li><a href="../lantu/runtime/builder.py"><code>runtime/builder.py</code></a>：查看三个对象如何被组装</li>
+  </ul>
+  <p>复习：<a href="../reference/core-objects.html">三个核心对象速查表</a>。异步语法不清楚时查 <a href="https://docs.python.org/3/library/asyncio.html">Python asyncio 官方文档</a>。</p>
+
+  <footer>完成后告诉我你的选择，并用一句话说明原因。遇到不清楚的代码可直接问我。</footer>
+  <script>
+    function answer(choice) {
+      const result = document.getElementById('result');
+      result.textContent = choice === 'agent'
+        ? '正确。Agent 负责接收工具调用、执行工具并将结果写回对话。'
+        : '再想一次：谁同时连接模型事件、工具执行和对话状态？';
+    }
+  </script>
+</body>
+</html>

@@ -118,6 +118,39 @@ async def test_single_step_tool_call():
     assert len(c["loop"]) == 1
     assert c["loop"][0].total_turns == 2
 
+
+@pytest.mark.asyncio
+async def test_noninteractive_tool_execution_records_journal_events(tmp_path):
+    class RecordingSession:
+        session_id = "session_a"
+
+        def __init__(self):
+            self.events = []
+
+        def record(self, event):
+            self.events.append(event)
+
+    target = tmp_path / "sample.txt"
+    target.write_text("hello", encoding="utf-8")
+    session = RecordingSession()
+    agent = Agent(
+        MockLLMClient([]),
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+
+    result = await agent._execute_tool_noninteractive(
+        ToolCallComplete("tool_1", "ReadFile", {"file_path": str(target)})
+    )
+
+    assert result.is_error is False
+    assert [event.event_type for event in session.events] == [
+        "tool.started",
+        "tool.completed",
+    ]
+
 @pytest.mark.asyncio
 async def test_multi_step_autonomous():
     """Agent 先 WriteFile 再 ReadFile 然后停止 —— 端到端的多步流程。"""

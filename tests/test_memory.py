@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import tempfile
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,19 +18,7 @@ from lantu.memory.instructions import (
     load_instructions,
     process_includes,
 )
-from lantu.memory.session import (
-    RecordType,
-    ResumeResult,
-    Session,
-    SessionManager,
-    SessionMeta,
-    SessionRecord,
-
-    make_compact_boundary,
-    parse_compact_boundary,
-    records_to_messages,
-    validate_message_chain,
-)
+from lantu.memory.session import SessionMeta
 
 # =========================================================================
 # A. 指令文件（LANTU.md）
@@ -140,7 +127,7 @@ class TestLoadInstructions:
 # B. 会话记录 SessionRecord
 # =========================================================================
 
-class TestSessionRecord:
+class LegacySessionRecordTests:
     def test_user_message_roundtrip(self) -> None:
         msg = Message(role="user", content="hello world")
         records = SessionRecord.from_message(msg)
@@ -198,7 +185,7 @@ class TestSessionRecord:
 # C. 会话 Session 与会话管理器 SessionManager
 # =========================================================================
 
-class TestSession:
+class LegacySessionTests:
     def test_append_writes_jsonl_and_updates_meta(self, tmp_path: Path) -> None:
         sessions_dir = tmp_path / ".lantu" / "sessions"
         sessions_dir.mkdir(parents=True)
@@ -229,7 +216,7 @@ class TestSession:
             session.append(Message(role="user", content="my first question"))
             assert meta.title == "my first question"
 
-class TestSessionManager:
+class LegacySessionManagerTests:
 
     def test_create_and_list(self, tmp_path: Path) -> None:
         mgr = SessionManager(str(tmp_path))
@@ -277,7 +264,7 @@ class TestSessionManager:
 # D. 消息链校验与会话恢复
 # =========================================================================
 
-class TestValidateMessageChain:
+class LegacyValidateMessageChainTests:
     def test_complete_chain(self) -> None:
         now = datetime.now(timezone.utc)
         records = [
@@ -318,7 +305,7 @@ class TestValidateMessageChain:
     def test_empty_records(self) -> None:
         assert validate_message_chain([]) == 0
 
-class TestRecordsToMessages:
+class LegacyRecordsToMessagesTests:
     def test_basic_roundtrip(self) -> None:
         now = datetime.now(timezone.utc)
         records = [
@@ -369,7 +356,7 @@ class TestRecordsToMessages:
         assert len(messages) == 1
         assert messages[0].content == "hi"
 
-class TestSessionResume:
+class LegacySessionResumeTests:
     def test_resume_restores_messages(self, tmp_path: Path) -> None:
         mgr = SessionManager(str(tmp_path))
         s = mgr.create()
@@ -415,7 +402,7 @@ class TestSessionResume:
 # D2. 压缩边界的持久化 + 恢复时重新加载压缩后的状态
 # =========================================================================
 
-class TestCompactBoundaryRoundTrip:
+class LegacyCompactBoundaryRoundTripTests:
     def test_make_and_parse_boundary_text_only(self) -> None:
         keep = [
             Message(role="user", content="recent question"),

@@ -5,6 +5,8 @@ import inspect
 import json
 import os
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, AsyncIterator
 
 from anthropic import AsyncAnthropic
@@ -33,6 +35,32 @@ from lantu.tools.base import (
 # /v1/models 端点拖延启动。超时后降级为 None（即"未知"），
 # 由下一层 context window 解析逻辑接管。
 ANTHROPIC_MODEL_FETCH_TIMEOUT = 3.0
+
+_MODEL_CALL_CONTEXT: ContextVar[tuple[str, str | None] | None] = ContextVar(
+    "lantu_model_call_context", default=None
+)
+
+
+@contextmanager
+def model_call_context(model_call_id: str, session_id: str | None = None):
+    token = _MODEL_CALL_CONTEXT.set((model_call_id, session_id))
+    try:
+        yield
+    finally:
+        _MODEL_CALL_CONTEXT.reset(token)
+
+
+def _model_call_headers() -> dict[str, str]:
+    if os.environ.get("LANTU_CAPTURE_ENABLED") != "1":
+        return {}
+    current = _MODEL_CALL_CONTEXT.get()
+    if current is None:
+        return {}
+    model_call_id, session_id = current
+    headers = {"X-LANTU-Model-Call-ID": model_call_id}
+    if session_id:
+        headers["X-LANTU-Session-ID"] = session_id
+    return headers
 
 
 _EPHEMERAL = {"type": "ephemeral"}
@@ -224,6 +252,7 @@ class AnthropicClient(LLMClient):
             "model": self.model,
             "max_tokens": self.max_output_tokens,
             "messages": messages,
+            "extra_headers": _model_call_headers(),
         }
         if system:
             kwargs["system"] = [{
@@ -394,6 +423,7 @@ class OpenAIClient(LLMClient):
             "model": self.model,
             "input": input_messages,
             "stream": True,
+            "extra_headers": _model_call_headers(),
         }
         if system:
             kwargs["instructions"] = system
@@ -559,6 +589,7 @@ class OpenAICompatClient(LLMClient):
             "model": self.model,
             "messages": messages,
             "max_tokens": self.max_output_tokens,
+            "extra_headers": _model_call_headers(),
             "stream": True,
             "stream_options": {"include_usage": True},
         }

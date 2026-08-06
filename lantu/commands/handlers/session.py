@@ -65,7 +65,9 @@ async def handle_session(ctx: CommandContext) -> None:
             ctx.ui.add_system_message(f"会话未找到: {session_id}")
             return
         if ctx.session:
+            ctx.session.stop_runtime("session_switch")
             ctx.session.close()
+        result.session.start_runtime("resume")
         ctx.config["set_session"](result.session)
         conv = ConversationManager()
         for msg in result.messages:
@@ -81,8 +83,10 @@ async def handle_session(ctx: CommandContext) -> None:
 
     elif sub == "new":
         if ctx.session:
+            ctx.session.stop_runtime("session_switch")
             ctx.session.close()
         new_session = sm.create()
+        new_session.start_runtime("new")
         ctx.config["set_session"](new_session)
         ctx.config["set_conversation"](ConversationManager())
         if ctx.agent:

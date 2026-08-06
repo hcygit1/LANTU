@@ -22,7 +22,6 @@ from lantu.client import LLMError
 from lantu.commands import CommandContext
 from lantu.conversation import ConversationManager, Message
 from lantu.filehistory import FileHistory
-from lantu.memory.session import make_compact_boundary
 from lantu.permissions import PermissionMode
 from lantu.prompts import build_plan_mode_exit_reminder
 from lantu.runtime import InteractiveRuntime
@@ -246,10 +245,16 @@ class InlineApp:
         agent_started = False
         finished = False
         external_cancel = False
+        turn_open = False
+        interruption_reason = "agent_error"
         try:
             self.runtime.refresh_skills_if_needed()
             await self.runtime.wait_until_ready()
             self._drain_startup_messages()
+            self.runtime.session.start_turn(
+                "notification" if is_notification else "user"
+            )
+            turn_open = True
 
             if text and "@" in text:
                 text = expand_at_refs(text, self.agent.work_dir)
@@ -297,9 +302,14 @@ class InlineApp:
                 elif isinstance(event, LoopComplete):
                     finished = True
                     self.persist_unseen_messages(seen_messages)
+                    self.runtime.session.complete_turn(event.total_turns)
+                    turn_open = False
                     if self.agent.plan_mode:
                         await self.handle_plan_approval()
         except asyncio.CancelledError:
+            interruption_reason = (
+                "user_cancelled" if self._turn_cancel_requested else "runtime_cancelled"
+            )
             if not finished:
                 self.events.finish()
                 finished = True
@@ -313,6 +323,7 @@ class InlineApp:
                 external_cancel = True
                 raise
         except LLMError as exc:
+            interruption_reason = "model_error"
             if not finished:
                 self.events.finish()
                 finished = True
@@ -322,6 +333,8 @@ class InlineApp:
                 self.events.finish()
             if agent_started:
                 self.persist_unseen_messages(seen_messages)
+            if turn_open:
+                self.runtime.session.interrupt_turn(interruption_reason)
             self.runtime.session.update_total_tokens(
                 self.agent.total_input_tokens + self.agent.total_output_tokens
             )
@@ -375,9 +388,7 @@ class InlineApp:
         boundary = notification.boundary
         if boundary is None:
             return
-        self.runtime.session.append_record(
-            make_compact_boundary(boundary.summary, boundary.keep)
-        )
+        self.runtime.session.context_compacted(boundary.summary, boundary.keep)
 
     async def process_task_notifications(self) -> None:
         if self._processing_notifications:

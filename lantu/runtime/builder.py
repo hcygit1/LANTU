@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 from lantu.agent import Agent
@@ -63,9 +64,32 @@ async def _build_core(
     hook_engine: HookEngine | None,
     work_dir: Path,
 ) -> InteractiveRuntime:
-    client = create_client(provider)
+    work_dir_str = str(work_dir)
+    session_manager = SessionManager(work_dir_str)
+    session = session_manager.create()
+    session.start_runtime("new")
+    capture_process = None
+    if os.environ.get("LANTU_CAPTURE_ENABLED") == "1":
+        from lantu.tools.lens.capture_runtime import CaptureProxy
+
+        capture_process = CaptureProxy(
+            work_dir,
+            int(os.environ.get("LANTU_CAPTURE_PORT", "7788")),
+            session.session_id,
+        )
+        try:
+            capture_process.start()
+        except BaseException:
+            session.close()
+            raise
     try:
-        work_dir_str = str(work_dir)
+        client = create_client(provider)
+    except BaseException:
+        session.close()
+        if capture_process is not None:
+            capture_process.stop()
+        raise
+    try:
         home = Path.home()
         checker = PermissionChecker(
             detector=DangerousCommandDetector(),
@@ -79,14 +103,14 @@ async def _build_core(
             sandbox_enabled=config.sandbox.enabled and config.sandbox.auto_allow,
         )
         memory_manager = MemoryManager(work_dir_str)
-        session_manager = SessionManager(work_dir_str)
-        session_manager.cleanup()
-        session = session_manager.create()
     except BaseException:
         try:
             await client.aclose()
         except BaseException:
             pass
+        session.close()
+        if capture_process is not None:
+            capture_process.stop()
         raise
 
     try:
@@ -128,6 +152,7 @@ async def _build_core(
             instructions_content=load_instructions(work_dir_str),
             memory_manager=memory_manager,
             hook_engine=hook_engine,
+            session=session,
         )
         agent.file_history = file_history
         agent.session_id = session.session_id
@@ -169,6 +194,7 @@ async def _build_core(
             load_skill_tool=None,
             install_skill_tool=None,
             exit_plan_mode_tool=None,
+            capture_process=capture_process,
         )
     except BaseException:
         session.close()
@@ -176,6 +202,8 @@ async def _build_core(
             await client.aclose()
         except BaseException:
             pass
+        if capture_process is not None:
+            capture_process.stop()
         raise
 
 

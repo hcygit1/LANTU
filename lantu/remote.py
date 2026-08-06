@@ -237,6 +237,7 @@ class RemoteServer:
         self.memory_manager = MemoryManager(work_dir)
         self.session_manager = SessionManager(work_dir)
         self.session = self.session_manager.create()
+        self.session.start_runtime("new")
         self.session_id = self.session.session_id
 
         # 创建 LLM 客户端
@@ -263,6 +264,7 @@ class RemoteServer:
             instructions_content=instructions,
             memory_manager=self.memory_manager,
             hook_engine=self.hook_engine,
+            session=self.session,
         )
         self.agent.session_id = self.session_id
 
@@ -341,8 +343,13 @@ class RemoteServer:
         self._streaming = True
         assert self.conversation is not None
         assert self.agent is not None
+        assert self.session is not None
 
+        self.session.start_turn("user")
+        turn_open = True
+        interruption_reason = "agent_error"
         self.conversation.add_user_message(content)
+        self.session.commit_message(self.conversation.history[-1])
 
         # 首次注入 MCP 指令
         if self._mcp_instructions:
@@ -353,6 +360,7 @@ class RemoteServer:
         self._cancel_event = asyncio.Event()
         start_time = time.monotonic()
         stream_buf = ""
+        history_cursor = len(self.conversation.history)
 
         try:
             async for event in self.agent.run(self.conversation):
@@ -416,6 +424,9 @@ class RemoteServer:
                     })
 
                 elif isinstance(event, TurnComplete):
+                    for message in self.conversation.history[history_cursor:]:
+                        self.session.commit_message(message)
+                    history_cursor = len(self.conversation.history)
                     if stream_buf:
                         await self._broadcast({
                             "type": "stream_end",
@@ -428,6 +439,11 @@ class RemoteServer:
                     })
 
                 elif isinstance(event, LoopComplete):
+                    for message in self.conversation.history[history_cursor:]:
+                        self.session.commit_message(message)
+                    history_cursor = len(self.conversation.history)
+                    self.session.complete_turn(event.total_turns)
+                    turn_open = False
                     if stream_buf:
                         await self._broadcast({
                             "type": "stream_end",
@@ -459,6 +475,12 @@ class RemoteServer:
                     })
 
                 elif isinstance(event, CompactNotification):
+                    if event.boundary is not None:
+                        self.session.context_compacted(
+                            event.boundary.summary,
+                            event.boundary.keep,
+                        )
+                        history_cursor = len(self.conversation.history)
                     await self._broadcast({
                         "type": "compact",
                         "data": {"message": event.message},
@@ -483,6 +505,7 @@ class RemoteServer:
                     })
 
         except asyncio.CancelledError:
+            interruption_reason = "user_cancelled"
             await self._broadcast({
                 "type": "error",
                 "data": {"message": "Operation cancelled"},
@@ -494,6 +517,10 @@ class RemoteServer:
                 "data": {"message": str(exc)},
             })
         finally:
+            for message in self.conversation.history[history_cursor:]:
+                self.session.commit_message(message)
+            if turn_open:
+                self.session.interrupt_turn(interruption_reason)
             self._streaming = False
             self._cancel_event = None
 
