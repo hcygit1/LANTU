@@ -151,6 +151,60 @@ async def test_noninteractive_tool_execution_records_journal_events(tmp_path):
         "tool.completed",
     ]
 
+
+@pytest.mark.asyncio
+async def test_run_records_model_usage_in_session():
+    class RecordingSession:
+        session_id = "session_a"
+
+        def __init__(self):
+            self.events = []
+
+        def record(self, event):
+            self.events.append(event)
+
+    session = RecordingSession()
+    client = MockLLMClient(
+        [[
+            TextDelta("done"),
+            StreamEnd(
+                "end_turn",
+                input_tokens=10,
+                output_tokens=5,
+                cache_read=3,
+                cache_creation=2,
+            ),
+        ]]
+    )
+    agent = Agent(
+        client,
+        create_default_registry(),
+        "openai-compat",
+        work_dir=".",
+        session=session,
+    )
+    conversation = ConversationManager()
+    conversation.add_user_message("test")
+
+    events = []
+    async for event in agent.run(conversation):
+        events.append(event)
+
+    usage_events = [event for event in events if isinstance(event, UsageEvent)]
+    assert usage_events == [UsageEvent(input_tokens=10, output_tokens=5)]
+
+    recorded = [event for event in session.events if event.event_type == "usage.recorded"]
+    assert len(recorded) == 1
+    assert recorded[0].payload == {
+        "provider": "openai-compat",
+        "model": "",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_read_tokens": 3,
+        "cache_creation_tokens": 2,
+    }
+
+
 @pytest.mark.asyncio
 async def test_multi_step_autonomous():
     """Agent 先 WriteFile 再 ReadFile 然后停止 —— 端到端的多步流程。"""

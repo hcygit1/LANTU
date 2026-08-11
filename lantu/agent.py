@@ -609,12 +609,7 @@ class Agent:
                 for he in self._drain_hook_events():
                     yield he
 
-            self.total_input_tokens += response.input_tokens
-            self.total_output_tokens += response.output_tokens
-            yield UsageEvent(
-                input_tokens=self.total_input_tokens,
-                output_tokens=self.total_output_tokens,
-            )
+            yield self._record_usage(response)
 
             conv_thinking = [
                 ConvThinkingBlock(thinking=tb.thinking, signature=tb.signature)
@@ -1030,6 +1025,32 @@ class Agent:
             )
         )
 
+    def _record_usage(self, response: LLMResponse) -> UsageEvent:
+        self.total_input_tokens += response.input_tokens
+        self.total_output_tokens += response.output_tokens
+
+        if self.session is not None:
+            from lantu.memory.session import ExecutionEvent
+
+            self.session.record(
+                ExecutionEvent(
+                    "usage.recorded",
+                    {
+                        "provider": self.protocol,
+                        "model": getattr(self.client, "model", ""),
+                        "input_tokens": response.input_tokens,
+                        "output_tokens": response.output_tokens,
+                        "cache_read_tokens": response.cache_read,
+                        "cache_creation_tokens": response.cache_creation,
+                    },
+                )
+            )
+
+        return UsageEvent(
+            input_tokens=self.total_input_tokens,
+            output_tokens=self.total_output_tokens,
+        )
+
     def _record_tool_started(self, tc: ToolCallComplete) -> None:
         if self.session is None:
             return
@@ -1318,31 +1339,14 @@ class Agent:
                     "elapsed_ms": int((time.monotonic() - model_started) * 1000),
                 },
             )
-            self.total_input_tokens += response.input_tokens
-            self.total_output_tokens += response.output_tokens
-            if self.session is not None:
-                from lantu.memory.session import ExecutionEvent
-
-                self.session.record(
-                    ExecutionEvent(
-                        "usage.recorded",
-                        {
-                            "provider": self.protocol,
-                            "model": getattr(self.client, "model", ""),
-                            "input_tokens": response.input_tokens,
-                            "output_tokens": response.output_tokens,
-                            "cache_read_tokens": response.cache_read,
-                            "cache_creation_tokens": response.cache_creation,
-                        },
-                    )
-                )
+            usage = self._record_usage(response)
 
             if event_callback:
                 event_callback({
                     "type": "usage",
                     "usage": {
-                        "inputTokens": self.total_input_tokens,
-                        "outputTokens": self.total_output_tokens,
+                        "inputTokens": usage.input_tokens,
+                        "outputTokens": usage.output_tokens,
                     },
                 })
 
