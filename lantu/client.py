@@ -600,6 +600,7 @@ class OpenAICompatClient(LLMClient):
         # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。
         active_calls: dict[int, dict[str, str]] = {}  # 索引 -> {id, name, args}
         reasoning_accum = ""
+        stop_reason = "end_turn"
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
@@ -617,7 +618,7 @@ class OpenAICompatClient(LLMClient):
                         cache_read = getattr(details, "cached_tokens", 0) or 0
                         prompt_tokens = chunk.usage.prompt_tokens or 0
                         yield StreamEnd(
-                            stop_reason="end_turn",
+                            stop_reason=stop_reason,
                             input_tokens=max(prompt_tokens - cache_read, 0),
                             output_tokens=chunk.usage.completion_tokens or 0,
                             cache_read=cache_read,
@@ -660,6 +661,13 @@ class OpenAICompatClient(LLMClient):
                             yield ToolCallDelta(text=tc.function.arguments)
 
                 # --- 结束原因 ---
+                if choice.finish_reason == "length":
+                    stop_reason = "max_tokens"
+                elif choice.finish_reason == "tool_calls":
+                    stop_reason = "tool_use"
+                elif choice.finish_reason == "stop":
+                    stop_reason = "end_turn"
+
                 if choice.finish_reason in ("tool_calls", "stop"):
                     if reasoning_accum:
                         yield ThinkingComplete(thinking=reasoning_accum, signature="")
