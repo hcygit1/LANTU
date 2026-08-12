@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+
+apt-get update
+DEBIAN_FRONTEND=noninteractive apt-get install -y curl git
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+{% if version %}
+uv tool install --force --from git+https://github.com/hcygit1/LANTU.git@{{ version }} lantu
+{% else %}
+uv tool install --force --from git+https://github.com/hcygit1/LANTU.git@f54ddfb0fe0a75ca2070df8c2eeda4e7e289a4d2 lantu
+{% endif %}
+
+lantu --help >/dev/null
