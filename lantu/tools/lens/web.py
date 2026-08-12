@@ -35,6 +35,10 @@ def create_lens_app(work_dir: str | Path) -> FastAPI:
             "session_id": session_id,
             "events": [asdict(event) for event in events],
             "tasks": [asdict(task) for task in reader.tasks(session_id)],
+            "actions": [
+                {"task_id": task.task_id, "graph": asdict(graph)}
+                for task, graph in zip(reader.tasks(session_id), reader.action_graphs(session_id))
+            ],
             "diagnosis": reader.report(session_id).to_dict(),
             "evidence": [asdict(link) for link in reader.evidence_links(session_id)],
         }

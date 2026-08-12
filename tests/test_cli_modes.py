@@ -219,7 +219,7 @@ class ClosingClient:
 
 
 @pytest.mark.asyncio
-async def test_run_prompt_closes_client_after_normal_completion(monkeypatch) -> None:
+async def test_run_prompt_closes_client_after_normal_completion(monkeypatch, tmp_path) -> None:
     client = ClosingClient()
     calls = []
 
@@ -230,6 +230,7 @@ async def test_run_prompt_closes_client_after_normal_completion(monkeypatch) -> 
     monkeypatch.setattr(
         cli, "_run_prompt_with_client", run_with_client, raising=False
     )
+    monkeypatch.chdir(tmp_path)
     config = make_config()
 
     await cli._run_prompt(
@@ -251,7 +252,7 @@ async def test_run_prompt_closes_client_after_normal_completion(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_run_prompt_closes_client_after_stream_failure(monkeypatch) -> None:
+async def test_run_prompt_closes_client_after_stream_failure(monkeypatch, tmp_path) -> None:
     client = ClosingClient()
 
     async def fail_stream(*_args) -> None:
@@ -259,6 +260,7 @@ async def test_run_prompt_closes_client_after_stream_failure(monkeypatch) -> Non
 
     monkeypatch.setattr("lantu.client.create_client", lambda _provider: client)
     monkeypatch.setattr(cli, "_run_prompt_with_client", fail_stream, raising=False)
+    monkeypatch.chdir(tmp_path)
 
     with pytest.raises(RuntimeError, match="stream failed"):
         await cli._run_prompt(
@@ -269,7 +271,7 @@ async def test_run_prompt_closes_client_after_stream_failure(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_run_prompt_closes_client_after_cancellation(monkeypatch) -> None:
+async def test_run_prompt_closes_client_after_cancellation(monkeypatch, tmp_path) -> None:
     client = ClosingClient()
 
     async def cancel(*_args) -> None:
@@ -277,6 +279,7 @@ async def test_run_prompt_closes_client_after_cancellation(monkeypatch) -> None:
 
     monkeypatch.setattr("lantu.client.create_client", lambda _provider: client)
     monkeypatch.setattr(cli, "_run_prompt_with_client", cancel, raising=False)
+    monkeypatch.chdir(tmp_path)
 
     with pytest.raises(asyncio.CancelledError):
         await cli._run_prompt(

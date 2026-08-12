@@ -25,9 +25,14 @@ class LensReader:
         self.sessions_dir = self.work_dir / ".lantu" / "sessions"
 
     def session_ids(self) -> list[str]:
-        return sorted(
-            path.stem for path in self.sessions_dir.glob("*.jsonl") if path.is_file()
-        )
+        session_ids: list[str] = []
+        for path in self.sessions_dir.glob("*.jsonl"):
+            if not path.is_file():
+                continue
+            events = SessionJournal.read_file(path)
+            if any(event.type == "turn.started" for event in events):
+                session_ids.append(path.stem)
+        return sorted(session_ids)
 
     def read(self, session_id: str) -> list[JournalEvent]:
         path = self.sessions_dir / f"{session_id}.jsonl"

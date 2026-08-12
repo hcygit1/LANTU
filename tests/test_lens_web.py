@@ -9,6 +9,7 @@ from lantu.tools.lens.web import create_lens_app
 def test_lens_web_reads_session_journal(tmp_path: Path) -> None:
     journal = SessionJournal(tmp_path / ".lantu" / "sessions", "session_a")
     journal.append("session.created", {})
+    journal.append("turn.started", {"trigger": "user"})
     journal.close()
     client = TestClient(create_lens_app(tmp_path))
 
@@ -16,11 +17,13 @@ def test_lens_web_reads_session_journal(tmp_path: Path) -> None:
     assert client.get("/api/sessions").json() == [{"id": "session_a"}]
     detail = client.get("/api/session/session_a").json()
     assert detail["events"][0]["type"] == "session.created"
+    assert detail["actions"] == [{"task_id": "task_1", "graph": {"nodes": [], "edges": []}}]
 
 
 def test_lens_web_searches_all_sessions(tmp_path: Path) -> None:
     journal = SessionJournal(tmp_path / ".lantu" / "sessions", "session_a")
     journal.append("session.created", {"project_root": "needle"})
+    journal.append("turn.started", {"trigger": "user"})
     journal.close()
     client = TestClient(create_lens_app(tmp_path))
     assert client.get("/api/search", params={"query": "needle"}).json()[0]["session_id"] == "session_a"
