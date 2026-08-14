@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import platform
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -14,19 +12,6 @@ class PromptSection:
     name: str
     priority: int
     content: str
-
-
-@dataclass
-class EnvironmentContext:
-    """运行环境上下文（对齐 Go 版 EnvironmentContext）。"""
-    work_dir: str
-    os_name: str       # 操作系统名称（如 Linux, Darwin）
-    arch: str          # 架构（如 x86_64, arm64）
-    shell: str         # 当前 shell（如 /bin/bash）
-    is_git_repo: bool  # 工作目录是否在 git 仓库内
-    git_branch: str    # 当前 git 分支（非 git 仓库时为空）
-    model: str         # 当前使用的模型名称
-    date: str          # 当前日期（YYYY-MM-DD）
 
 
 class PromptBuilder:
@@ -162,58 +147,6 @@ In code: default to writing no comments. Never write multi-paragraph docstrings 
 )
 
 
-def detect_environment(work_dir: str) -> EnvironmentContext:
-    """检测当前运行环境，返回 EnvironmentContext（对齐 Go 版 DetectEnvironment）。"""
-    shell = os.environ.get("SHELL", "bash")
-    is_git = False
-    branch = ""
-    try:
-        out = subprocess.run(
-            ["git", "-C", work_dir, "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if out.returncode == 0 and out.stdout.strip() == "true":
-            is_git = True
-            br = subprocess.run(
-                ["git", "-C", work_dir, "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=5,
-            )
-            if br.returncode == 0:
-                branch = br.stdout.strip()
-    except Exception:
-        pass
-
-    return EnvironmentContext(
-        work_dir=work_dir,
-        os_name=platform.system(),
-        arch=platform.machine(),
-        shell=shell,
-        is_git_repo=is_git,
-        git_branch=branch,
-        model="",
-        date=datetime.now().strftime("%Y-%m-%d"),
-    )
-
-
-def environment_section(work_dir: str, env: EnvironmentContext | None = None) -> PromptSection:
-    """构建环境信息 prompt 段落（对齐 Go 版 EnvironmentSection）。"""
-    if env is None:
-        env = detect_environment(work_dir)
-    lines = [
-        "# Environment",
-        f" - Working directory: {env.work_dir}",
-        f" - Platform: {env.os_name}/{env.arch}",
-        f" - Shell: {env.shell}",
-        f" - Is Git repo: {env.is_git_repo}",
-    ]
-    if env.is_git_repo and env.git_branch:
-        lines.append(f" - Git branch: {env.git_branch}")
-    if env.model:
-        lines.append(f" - Model: {env.model}")
-    lines.append(f" - Date: {env.date}")
-    return PromptSection(name="Environment", priority=70, content="\n".join(lines))
-
-
 # ---------------------------------------------------------------------------
 # Plan 模式提示语（对应 Go 版 plan_mode.go）
 # ---------------------------------------------------------------------------
@@ -318,13 +251,8 @@ def build_plan_mode_reminder(
 # ---------------------------------------------------------------------------
 
 def build_system_prompt(
-    hook_prompts: list[str] | None = None,
     coordinator_mode: bool = False,
     agent_catalog: list[tuple[str, str]] | None = None,
-    custom_instructions: str = "",
-    skill_section: str = "",
-    memory_section: str = "",
-    work_dir: str = ".",
 ) -> str:
     if coordinator_mode:
         from lantu.teams.coordinator import get_coordinator_system_prompt
@@ -338,27 +266,7 @@ def build_system_prompt(
     b.add(USING_TOOLS_SECTION)
     b.add(TONE_STYLE_SECTION)
     b.add(TEXT_OUTPUT_SECTION)
-    b.add(environment_section(work_dir))
-
-    if custom_instructions:
-        b.add(PromptSection(
-            name="CustomInstructions",
-            priority=80,
-            content=f"# Project Instructions\n\n{custom_instructions}",
-        ))
-
-    if skill_section:
-        b.add(PromptSection(name="Skills", priority=90, content=skill_section))
-
-    if memory_section:
-        b.add(PromptSection(name="Memory", priority=95, content=memory_section))
-
-    result = b.build()
-
-    if hook_prompts:
-        result += "\n\n# Hook Injected Context\n" + "\n".join(hook_prompts)
-
-    return result
+    return b.build()
 
 
 def build_environment_context(

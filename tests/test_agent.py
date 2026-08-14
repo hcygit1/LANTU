@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from copy import deepcopy
 from typing import Any, AsyncIterator
 
 import pytest
@@ -23,6 +24,7 @@ from lantu.agent import (
 from lantu.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from lantu.client import LLMClient
 from lantu.conversation import ConversationManager
+from lantu.hooks import Action, Hook, HookEngine
 from lantu.serialization import build_anthropic_messages
 from lantu.tools import create_default_registry
 from lantu.tools.base import (
@@ -41,6 +43,8 @@ class MockLLMClient(LLMClient):
         self._responses = list(responses)
         self._call_index = 0
         self._yield_control = yield_control
+        self.systems: list[str] = []
+        self.message_snapshots: list[list] = []
 
     async def stream(
         self,
@@ -48,6 +52,8 @@ class MockLLMClient(LLMClient):
         system: str = "",
         tools: list[dict[str, Any]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        self.systems.append(system)
+        self.message_snapshots.append(deepcopy(conversation.get_messages()))
         if self._call_index >= len(self._responses):
             yield TextDelta(text="No more responses")
             yield StreamEnd(stop_reason="end_turn", input_tokens=1, output_tokens=1)
@@ -117,6 +123,96 @@ async def test_single_step_tool_call():
     assert len(c["turn"]) == 1
     assert len(c["loop"]) == 1
     assert c["loop"][0].total_turns == 2
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_is_stable_across_tool_loop():
+    client = MockLLMClient([
+        [
+            ToolCallComplete("t1", "ReadFile", {"file_path": "LANTU.md"}),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=5),
+        ],
+        [
+            TextDelta("done"),
+            StreamEnd("end_turn", input_tokens=20, output_tokens=5),
+        ],
+    ])
+    hook_engine = HookEngine([
+        Hook(
+            id="inject-context",
+            event="pre_send",
+            action=Action(type="prompt", message="Project info here"),
+            once=True,
+        )
+    ])
+    agent = Agent(
+        client,
+        create_default_registry(),
+        "anthropic",
+        hook_engine=hook_engine,
+    )
+    conversation = ConversationManager()
+    conversation.add_user_message("Read LANTU.md")
+
+    async for _ in agent.run(conversation):
+        pass
+
+    assert len(client.systems) == 2
+    assert client.systems[0] == client.systems[1]
+    assert "Project info here" not in client.systems[0]
+    assert sum(
+        "Project info here" in message.content
+        for message in client.message_snapshots[-1]
+    ) == 1
+
+
+@pytest.mark.asyncio
+async def test_system_prompt_is_stable_across_agent_runs():
+    client = MockLLMClient([
+        [TextDelta("first"), StreamEnd("end_turn", input_tokens=5, output_tokens=2)],
+        [TextDelta("second"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    agent = Agent(client, create_default_registry(), "anthropic")
+    conversation = ConversationManager()
+
+    conversation.add_user_message("first request")
+    async for _ in agent.run(conversation):
+        pass
+    conversation.add_user_message("second request")
+    async for _ in agent.run(conversation):
+        pass
+
+    assert len(client.systems) == 2
+    assert client.systems[0] == client.systems[1]
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_appends_hook_prompt_to_messages():
+    client = MockLLMClient([
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=5, output_tokens=2)],
+    ])
+    hook_engine = HookEngine([
+        Hook(
+            id="inject-context",
+            event="turn_start",
+            action=Action(type="prompt", message="Sub-agent context"),
+            once=True,
+        )
+    ])
+    agent = Agent(
+        client,
+        create_default_registry(),
+        "anthropic",
+        hook_engine=hook_engine,
+    )
+
+    await agent.run_to_completion("finish the task")
+
+    assert "Sub-agent context" not in client.systems[0]
+    assert any(
+        "Sub-agent context" in message.content
+        for message in client.message_snapshots[0]
+    )
 
 
 @pytest.mark.asyncio

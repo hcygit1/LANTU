@@ -103,7 +103,7 @@ class HookEngine:
                 log.warning("Hook '%s' execution error: %s", hook.id, e)
         return None
 
-    def get_prompt_messages(self) -> list[str]:
+    def drain_prompt_messages(self) -> list[str]:
         messages = list(self._prompt_messages)
         self._prompt_messages.clear()
         return messages

@@ -467,10 +467,10 @@ class TestHookEngine:
         engine = HookEngine([h])
         ctx = HookContext(event_name="session_start")
         await engine.run_hooks("session_start", ctx)
-        messages = engine.get_prompt_messages()
+        messages = engine.drain_prompt_messages()
         assert len(messages) == 1
         assert "Project info" in messages[0]
-        assert engine.get_prompt_messages() == []
+        assert engine.drain_prompt_messages() == []
 
     @pytest.mark.asyncio
     async def test_error_does_not_raise(self):

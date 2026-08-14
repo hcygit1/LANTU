@@ -353,6 +353,7 @@ class Agent:
         self._team_manager: Any = None
         self.notification_fn: Callable[[], list[str]] | None = None
         self.file_history: Any = None
+        self._stable_system_prompt: str | None = None
 
         # 非阻塞 memory recall：prefetch task 与主 LLM 调用并行，工具执行后注入
         self.memory_recall_task: Any | None = None
@@ -407,6 +408,20 @@ class Agent:
         self._agent_catalog = catalog
         if catalog_list is not None:
             self._agent_catalog_list = catalog_list
+
+    def _get_system_prompt(self) -> str:
+        if self._stable_system_prompt is None:
+            self._stable_system_prompt = build_system_prompt(
+                coordinator_mode=self.coordinator_mode,
+                agent_catalog=self._agent_catalog_list or None,
+            )
+        return self._stable_system_prompt
+
+    def _append_hook_prompts(self, conversation: ConversationManager) -> None:
+        if not self.hook_engine:
+            return
+        for prompt in self.hook_engine.drain_prompt_messages():
+            conversation.add_system_reminder(f"Hook injected context:\n{prompt}")
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
         return HookContext(
@@ -481,14 +496,8 @@ class Agent:
                 for he in self._drain_hook_events():
                     yield he
 
-            hook_prompts = (
-                self.hook_engine.get_prompt_messages() if self.hook_engine else None
-            )
-            system = build_system_prompt(
-                hook_prompts=hook_prompts,
-                coordinator_mode=self.coordinator_mode,
-                agent_catalog=self._agent_catalog_list or None,
-            )
+            self._append_hook_prompts(conversation)
+            system = self._get_system_prompt()
 
             if self.plan_mode:
                 plan_path = str(self._get_plan_path())
@@ -1221,13 +1230,7 @@ class Agent:
         if task:
             conversation.add_user_message(task)
 
-        hook_prompts = (
-            self.hook_engine.get_prompt_messages() if self.hook_engine else None
-        )
-        system = build_system_prompt(
-            hook_prompts=hook_prompts,
-            coordinator_mode=self.coordinator_mode,
-        )
+        system = self._get_system_prompt()
 
         tools = self.registry.get_all_schemas(self.protocol)
 
@@ -1249,6 +1252,7 @@ class Agent:
             if self.hook_engine:
                 ctx = self._build_hook_context("turn_start")
                 await self.hook_engine.run_hooks("turn_start", ctx)
+            self._append_hook_prompts(conversation)
 
             self._consume_mailbox(conversation)
             if self.notification_fn:
