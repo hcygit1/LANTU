@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import threading
@@ -76,92 +75,6 @@ class CompactEvent:
 
 
 # ---------------------------------------------------------------------------
-# 内容替换状态 — Design B（决策冻结，不做原地修改）
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ContentReplacementState:
-    seen_ids: set[str] = field(default_factory=set)
-    replacements: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class ContentReplacementRecord:
-    tool_use_id: str
-    replacement: str
-    kind: str = "tool-result"
-
-
-def create_replacement_state() -> ContentReplacementState:
-    return ContentReplacementState()
-
-
-def clone_replacement_state(src: ContentReplacementState) -> ContentReplacementState:
-    return ContentReplacementState(
-        seen_ids=set(src.seen_ids),
-        replacements=dict(src.replacements),
-    )
-
-
-REPLACEMENT_RECORDS_FILENAME = "replacement_records.jsonl"
-
-
-def append_replacement_records(
-    session_dir: Path, records: list[ContentReplacementRecord]
-) -> None:
-    if not records:
-        return
-    path = session_dir / REPLACEMENT_RECORDS_FILENAME
-    with path.open("a", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps({
-                "kind": r.kind,
-                "tool_use_id": r.tool_use_id,
-                "replacement": r.replacement,
-            }, ensure_ascii=False) + "\n")
-
-
-def load_replacement_records(session_dir: Path) -> list[ContentReplacementRecord]:
-    path = session_dir / REPLACEMENT_RECORDS_FILENAME
-    if not path.exists():
-        return []
-    out: list[ContentReplacementRecord] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            obj = json.loads(line)
-            out.append(ContentReplacementRecord(
-                kind=obj.get("kind", "tool-result"),
-                tool_use_id=obj["tool_use_id"],
-                replacement=obj["replacement"],
-            ))
-    return out
-
-
-def reconstruct_replacement_state(
-    messages: list[Message],
-    records: list[ContentReplacementRecord],
-    inherited_replacements: Mapping[str, str] | None = None,
-) -> ContentReplacementState:
-    state = create_replacement_state()
-    candidate_ids: set[str] = set()
-    for msg in messages:
-        for tr in msg.tool_results:
-            candidate_ids.add(tr.tool_use_id)
-    state.seen_ids.update(candidate_ids)
-    for r in records:
-        if r.kind == "tool-result" and r.tool_use_id in candidate_ids:
-            state.replacements[r.tool_use_id] = r.replacement
-    if inherited_replacements:
-        for tool_use_id, replacement in inherited_replacements.items():
-            if tool_use_id in candidate_ids and tool_use_id not in state.replacements:
-                state.replacements[tool_use_id] = replacement
-    return state
-
-
-# ---------------------------------------------------------------------------
 # Session 目录管理
 # ---------------------------------------------------------------------------
 
@@ -206,118 +119,51 @@ def make_persisted_preview(content: str, file_path: Path) -> str:
     )
 
 
-
-
-def _is_spill_readback(tool_use_id: str, tool_use_index: dict, abs_spill_dir: str) -> bool:
-    tu = tool_use_index.get(tool_use_id)
-    if tu is None or tu.tool_name != "ReadFile":
-        return False
-    raw = tu.arguments.get("file_path", "")
-    if not raw:
-        return False
-    abs_path = os.path.abspath(raw)
-    return abs_path.startswith(abs_spill_dir)
-
-
-def apply_tool_result_budget(
-    conversation: ConversationManager,
+def prepare_tool_results(
+    results: list[ToolResultBlock],
     session_dir: Path,
-    state: ContentReplacementState,
-) -> list[ContentReplacementRecord]:
-    """
-    Design A: 就地修改原始对话历史（匹配 Claude Code 实现）。
+) -> list[ToolResultBlock]:
+    """Finalize one turn's tool results before adding them to conversation history."""
+    prepared: list[ToolResultBlock] = []
+    for result in results:
+        content = result.content
+        if (
+            not content.startswith(PERSISTED_TAG)
+            and len(content) > SINGLE_RESULT_CHAR_LIMIT
+        ):
+            path = persist_tool_result(result.tool_use_id, content, session_dir)
+            content = make_persisted_preview(content, path)
+        prepared.append(
+            ToolResultBlock(
+                tool_use_id=result.tool_use_id,
+                content=content,
+                is_error=result.is_error,
+            )
+        )
 
-    直接修改 conversation.history 中消息的 ToolResultBlock.content，
-    对超限的 tool result 替换为落盘预览文本。
+    total = sum(len(result.content) for result in prepared)
+    candidates = sorted(
+        (
+            (index, result)
+            for index, result in enumerate(prepared)
+            if not result.content.startswith(PERSISTED_TAG)
+        ),
+        key=lambda item: len(item[1].content),
+        reverse=True,
+    )
+    for index, result in candidates:
+        if total <= AGGREGATE_CHAR_LIMIT:
+            break
+        path = persist_tool_result(result.tool_use_id, result.content, session_dir)
+        preview = make_persisted_preview(result.content, path)
+        prepared[index] = ToolResultBlock(
+            tool_use_id=result.tool_use_id,
+            content=preview,
+            is_error=result.is_error,
+        )
+        total += len(preview) - len(result.content)
 
-    state 会被 mutate：本轮新决定的 id 进入 seen_ids，新决定替换的 id 进入 replacements。
-
-    返回本轮新产生的替换记录列表（List[ContentReplacementRecord]）。
-    """
-    new_records: list[ContentReplacementRecord] = []
-
-    abs_spill_dir = os.path.abspath(str(session_dir))
-    tool_use_index: dict = {}
-    for msg in conversation.history:
-        for tu in msg.tool_uses:
-            tool_use_index[tu.tool_use_id] = tu
-
-    for msg in conversation.history:
-        if not msg.tool_results:
-            continue
-
-        fresh: list[ToolResultBlock] = []
-
-        for tr in msg.tool_results:
-            if tr.tool_use_id in state.replacements:
-                # 已有历史决策：就地应用替换
-                tr.content = state.replacements[tr.tool_use_id]
-            elif tr.tool_use_id in state.seen_ids:
-                # 见过但未替换：保持原内容不动
-                pass
-            elif tr.content.startswith(PERSISTED_TAG):
-                # 已被外部（如某些工具本身）打上 persisted-output 标签 —— 视为已知决策
-                state.seen_ids.add(tr.tool_use_id)
-                state.replacements[tr.tool_use_id] = tr.content
-                new_records.append(ContentReplacementRecord(
-                    tool_use_id=tr.tool_use_id, replacement=tr.content,
-                ))
-            else:
-                fresh.append(tr)
-
-        # Pass 1：单条超限
-        persisted_p1: set[str] = set()
-        for tr in fresh:
-            if len(tr.content) > SINGLE_RESULT_CHAR_LIMIT:
-                if _is_spill_readback(tr.tool_use_id, tool_use_index, abs_spill_dir):
-                    persisted_p1.add(tr.tool_use_id)
-                    continue
-                fp = persist_tool_result(tr.tool_use_id, tr.content, session_dir)
-                preview = make_persisted_preview(tr.content, fp)
-                state.replacements[tr.tool_use_id] = preview
-                state.seen_ids.add(tr.tool_use_id)
-                new_records.append(ContentReplacementRecord(
-                    tool_use_id=tr.tool_use_id, replacement=preview,
-                ))
-                # 就地替换消息内容
-                tr.content = preview
-                persisted_p1.add(tr.tool_use_id)
-
-        # Pass 2：聚合超限
-        remaining = [tr for tr in fresh if tr.tool_use_id not in persisted_p1]
-        total = sum(
-            len(state.replacements[tr.tool_use_id]) if tr.tool_use_id in state.replacements
-            else len(tr.content)
-            for tr in msg.tool_results
-            if tr.tool_use_id not in [r.tool_use_id for r in fresh
-                                       if r.tool_use_id not in persisted_p1
-                                       and r.tool_use_id not in state.replacements]
-        ) + sum(len(tr.content) for tr in remaining)
-        # 重新简单计算：所有 tool_results 的当前内容长度之和
-        total = sum(len(tr.content) for tr in msg.tool_results)
-        if total > AGGREGATE_CHAR_LIMIT:
-            ranked = sorted(remaining, key=lambda tr: len(tr.content), reverse=True)
-            for tr in ranked:
-                if sum(len(t.content) for t in msg.tool_results) <= AGGREGATE_CHAR_LIMIT:
-                    break
-                if _is_spill_readback(tr.tool_use_id, tool_use_index, abs_spill_dir):
-                    continue
-                fp = persist_tool_result(tr.tool_use_id, tr.content, session_dir)
-                preview = make_persisted_preview(tr.content, fp)
-                state.replacements[tr.tool_use_id] = preview
-                state.seen_ids.add(tr.tool_use_id)
-                new_records.append(ContentReplacementRecord(
-                    tool_use_id=tr.tool_use_id, replacement=preview,
-                ))
-                # 就地替换消息内容
-                tr.content = preview
-
-        # 剩余未替换的 fresh 标记为"已见但未替换"
-        for tr in fresh:
-            if tr.tool_use_id not in state.replacements:
-                state.seen_ids.add(tr.tool_use_id)
-
-    return new_records
+    return prepared
 
 
 # ---------------------------------------------------------------------------

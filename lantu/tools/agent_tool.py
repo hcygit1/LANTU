@@ -219,14 +219,6 @@ class AgentTool(Tool):
         sub_agent.parent_id = self._parent_agent.agent_id
         sub_agent.trace_id = self._parent_agent.trace_id or self._parent_agent.agent_id
 
-        # fork 子 agent 继承父 agent 的替换状态，确保共享的 tool_use_id 做出一致的
-        # 决策——这样父子共享的 prompt cache 前缀才能保持字节级一致
-        if p.subagent_type is None:
-            from lantu.context import clone_replacement_state
-            sub_agent.replacement_state = clone_replacement_state(
-                self._parent_agent.replacement_state
-            )
-
         # 注册追踪节点
         trace_node = self._trace_manager.create(
             agent_type=definition.agent_type,

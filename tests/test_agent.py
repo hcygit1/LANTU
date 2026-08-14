@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any, AsyncIterator
 
 import pytest
+from pydantic import BaseModel
 
 from lantu.agent import (
     Agent,
@@ -31,7 +32,9 @@ from lantu.tools.base import (
     StreamEnd,
     StreamEvent,
     TextDelta,
+    Tool,
     ToolCallComplete,
+    ToolResult,
 )
 
 # ---------------------------------------------------------------------------
@@ -167,6 +170,65 @@ async def test_system_prompt_is_stable_across_tool_loop():
 
 
 @pytest.mark.asyncio
+async def test_tool_result_is_fixed_before_entering_conversation(tmp_path):
+    class Params(BaseModel):
+        pass
+
+    class LargeOutputTool(Tool):
+        name = "LargeOutput"
+        description = "Return a large result"
+        params_model = Params
+
+        async def execute(self, params: Params) -> ToolResult:
+            return ToolResult(output="x" * 60_000)
+
+    class RecordingSession:
+        session_id = "session_a"
+
+        def __init__(self):
+            self.events = []
+
+        def record(self, event):
+            self.events.append(event)
+
+    client = MockLLMClient([
+        [
+            ToolCallComplete("t1", "LargeOutput", {}),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=10, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(LargeOutputTool())
+    session = RecordingSession()
+    agent = Agent(
+        client,
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+    conversation = ConversationManager()
+    conversation.add_user_message("run the tool")
+
+    async for _ in agent.run(conversation):
+        pass
+
+    context_result = next(
+        result
+        for message in conversation.history
+        for result in message.tool_results
+    )
+    completed = next(
+        event for event in session.events if event.event_type == "tool.completed"
+    )
+
+    assert context_result.content.startswith("<persisted-output>")
+    assert completed.payload["output"] == "x" * 60_000
+    assert (tmp_path / ".lantu/session/tool-results/t1.txt").exists()
+
+
+@pytest.mark.asyncio
 async def test_system_prompt_is_stable_across_agent_runs():
     client = MockLLMClient([
         [TextDelta("first"), StreamEnd("end_turn", input_tokens=5, output_tokens=2)],
@@ -213,6 +275,62 @@ async def test_run_to_completion_appends_hook_prompt_to_messages():
         "Sub-agent context" in message.content
         for message in client.message_snapshots[0]
     )
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_finalizes_tool_result_once(tmp_path):
+    class Params(BaseModel):
+        pass
+
+    class LargeOutputTool(Tool):
+        name = "LargeOutput"
+        description = "Return a large result"
+        params_model = Params
+
+        async def execute(self, params: Params) -> ToolResult:
+            return ToolResult(output="x" * 60_000)
+
+    class RecordingSession:
+        session_id = "session_a"
+
+        def __init__(self):
+            self.events = []
+
+        def record(self, event):
+            self.events.append(event)
+
+    client = MockLLMClient([
+        [
+            ToolCallComplete("t1", "LargeOutput", {}),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=10, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(LargeOutputTool())
+    session = RecordingSession()
+    agent = Agent(
+        client,
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+
+    await agent.run_to_completion("run the tool")
+
+    context_result = next(
+        result
+        for message in client.message_snapshots[1]
+        for result in message.tool_results
+    )
+    completed = next(
+        event for event in session.events if event.event_type == "tool.completed"
+    )
+
+    assert context_result.content.startswith("<persisted-output>")
+    assert completed.payload["output"] == "x" * 60_000
+    assert (tmp_path / ".lantu/session/tool-results/t1.txt").exists()
 
 
 @pytest.mark.asyncio

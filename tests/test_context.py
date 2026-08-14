@@ -16,16 +16,15 @@ from lantu.context.manager import (
     CompactCircuitBreaker,
     _align_keep_start_to_tool_pair,
     _compute_keep_start_index,
-    apply_tool_result_budget,
     auto_compact,
     build_compact_messages,
     cleanup_tool_results,
     compute_compact_threshold,
-    create_replacement_state,
     ensure_session_dir,
     extract_summary,
     make_persisted_preview,
     persist_tool_result,
+    prepare_tool_results,
     should_auto_compact,
 )
 from lantu.conversation import (
@@ -74,99 +73,52 @@ class TestMakePersistedPreview:
         assert len(preview_line[0]) == 2_000
 
 # ---------------------------------------------------------------------------
-# apply_tool_result_budget
+# prepare_tool_results
 # ---------------------------------------------------------------------------
 
-class TestApplyToolResultBudget:
+class TestPrepareToolResults:
     def test_single_oversized_persisted(self, tmp_path: Path) -> None:
-        conv = ConversationManager()
         big_content = "x" * (SINGLE_RESULT_CHAR_LIMIT + 100)
-        conv.history.append(
-            Message(
-                role="user",
-                content="",
-                tool_results=[
-                    ToolResultBlock(
-                        tool_use_id="toolu_big",
-                        content=big_content,
-                    )
-                ],
-            )
-        )
-        state = create_replacement_state()
+        source = [ToolResultBlock(tool_use_id="toolu_big", content=big_content)]
 
-        records = apply_tool_result_budget(conv, tmp_path, state)
+        prepared = prepare_tool_results(source, tmp_path)
 
-        # Design A：就地修改原始对话历史
-        tr = conv.history[0].tool_results[0]
-        assert tr.content.startswith(PERSISTED_TAG)
+        assert source[0].content == big_content
+        assert prepared[0].content.startswith(PERSISTED_TAG)
         assert (tmp_path / "toolu_big.txt").exists()
-        assert len(records) == 1 and records[0].tool_use_id == "toolu_big"
 
-    def test_under_limit_untouched(self, tmp_path: Path) -> None:
-        conv = ConversationManager()
-        small_content = "x" * 100
-        conv.history.append(
-            Message(
-                role="user",
-                content="",
-                tool_results=[
-                    ToolResultBlock(tool_use_id="toolu_sm", content=small_content)
-                ],
-            )
-        )
-        state = create_replacement_state()
+    def test_result_between_old_and_new_limit_is_preserved(self, tmp_path: Path) -> None:
+        content = "x" * 30_000
+        source = [ToolResultBlock(tool_use_id="toolu_mid", content=content)]
 
-        records = apply_tool_result_budget(conv, tmp_path, state)
+        prepared = prepare_tool_results(source, tmp_path)
 
-        # 未超限：内容保持不变（就地未修改）
-        tr = conv.history[0].tool_results[0]
-        assert tr.content == small_content
-        assert not (tmp_path / "toolu_sm.txt").exists()
-        assert records == []
-        assert "toolu_sm" in state.seen_ids
-        assert "toolu_sm" not in state.replacements
+        assert prepared[0].content == content
+        assert not (tmp_path / "toolu_mid.txt").exists()
 
     def test_aggregate_limit(self, tmp_path: Path) -> None:
-        conv = ConversationManager()
-        results = []
-        for i in range(5):
-            results.append(
-                ToolResultBlock(
-                    tool_use_id=f"toolu_agg_{i}",
-                    content="x" * (AGGREGATE_CHAR_LIMIT // 4),
-                )
-            )
-        conv.history.append(Message(role="user", content="", tool_results=results))
-        state = create_replacement_state()
+        content = "x" * (SINGLE_RESULT_CHAR_LIMIT - 1)
+        source = [
+            ToolResultBlock(tool_use_id=f"toolu_agg_{i}", content=content)
+            for i in range(5)
+        ]
 
-        apply_tool_result_budget(conv, tmp_path, state)
+        prepared = prepare_tool_results(source, tmp_path)
 
-        # Design A：就地修改，直接检查原始 conversation
-        total = sum(len(tr.content) for tr in conv.history[0].tool_results)
+        total = sum(len(result.content) for result in prepared)
         assert total <= AGGREGATE_CHAR_LIMIT
+        assert all(result.content == content for result in source)
+        assert any(result.content.startswith(PERSISTED_TAG) for result in prepared)
 
     def test_already_persisted_skipped(self, tmp_path: Path) -> None:
-        conv = ConversationManager()
         persisted_content = f"{PERSISTED_TAG}\nalready persisted\n</persisted-output>"
-        conv.history.append(
-            Message(
-                role="user",
-                content="",
-                tool_results=[
-                    ToolResultBlock(tool_use_id="toolu_done", content=persisted_content)
-                ],
-            )
-        )
-        state = create_replacement_state()
+        source = [
+            ToolResultBlock(tool_use_id="toolu_done", content=persisted_content)
+        ]
 
-        apply_tool_result_budget(conv, tmp_path, state)
+        prepared = prepare_tool_results(source, tmp_path)
 
-        tr = conv.history[0].tool_results[0]
-        assert tr.content == persisted_content
-        # 外部已预先打过标签的结果同样会被记录到 state.replacements 中，
-        # 这样后续重复应用时仍能保持逐字节一致。
-        assert state.replacements["toolu_done"] == persisted_content
+        assert prepared[0].content == persisted_content
 
 # ---------------------------------------------------------------------------
 # compute_compact_threshold

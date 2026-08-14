@@ -16,16 +16,10 @@ from lantu.context import (
     CompactBoundary,
     CompactCircuitBreaker,
     CompactEvent,
-    ContentReplacementRecord,
-    ContentReplacementState,
     RecoveryState,
-    append_replacement_records,
-    apply_tool_result_budget,
     auto_compact,
-    create_replacement_state,
     ensure_session_dir,
-    load_replacement_records,
-    reconstruct_replacement_state,
+    prepare_tool_results,
 )
 from lantu.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from lantu.conversation import ThinkingBlock as ConvThinkingBlock
@@ -40,7 +34,6 @@ from lantu.hooks.engine import HookNotification
 from lantu.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from lantu.tools import ToolRegistry
 from lantu.tools.base import (
-    MAX_OUTPUT_CHARS,
     StreamEnd,
     StreamEvent,
     TextDelta,
@@ -323,7 +316,6 @@ class Agent:
         self.context_window = context_window
         self.session_dir = ensure_session_dir(work_dir)
         self.compact_breaker = CompactCircuitBreaker()
-        self.replacement_state: ContentReplacementState = create_replacement_state()
         # 保存重建工作上下文所需的快照，在 Layer 2 压缩对话后使用：
         # 最近的文件读取和 skill 调用。每次 ReadFile / skill 调用时记录，
         # auto_compact 触发阈值时消费。
@@ -526,15 +518,7 @@ class Agent:
 
             tools = self.registry.get_all_schemas(self.protocol)
 
-            # Layer 1: apply tool-result budget（就地修改 conversation）
-            new_records = apply_tool_result_budget(
-                conversation, self.session_dir, self.replacement_state
-            )
-            if new_records:
-                append_replacement_records(self.session_dir, new_records)
-
-            # Layer 2: 接近 context window 上限时自动 compact
-            # tool-result budget 已就地修改 conversation，直接用 conversation.history 估算
+            # 接近 context window 上限时自动 compact
             compact_result = await auto_compact(
                 conversation,
                 self.client,
@@ -556,10 +540,6 @@ class Agent:
                 mem = self.memory_manager.load() if self.memory_manager else ""
                 conversation.inject_long_term_memory(
                     self.instructions_content, mem
-                )
-                # 压缩后重新应用 budget（就地修改）
-                apply_tool_result_budget(
-                    conversation, self.session_dir, self.replacement_state
                 )
             elif isinstance(compact_result, str):
                 yield ErrorEvent(message=compact_result)
@@ -710,13 +690,10 @@ class Agent:
                             consecutive_unknown += 1
                         else:
                             consecutive_unknown = 0
-                        content = self._maybe_persist_or_truncate(
-                            br.tool_id, br.result.output
-                        )
                         tool_results.append(
                             ToolResultBlock(
                                 tool_use_id=br.tool_id,
-                                content=content,
+                                content=br.result.output,
                                 is_error=br.result.is_error,
                             )
                         )
@@ -749,13 +726,10 @@ class Agent:
                                     output=f"Hook rejected: {rejection.reason}",
                                     is_error=True,
                                 )
-                                content = self._maybe_persist_or_truncate(
-                                    tc.tool_id, result.output
-                                )
                                 tool_results.append(
                                     ToolResultBlock(
                                         tool_use_id=tc.tool_id,
-                                        content=content,
+                                        content=result.output,
                                         is_error=True,
                                     )
                                 )
@@ -794,13 +768,10 @@ class Agent:
                             for he in self._drain_hook_events():
                                 yield he
 
-                        content = self._maybe_persist_or_truncate(
-                            tc.tool_id, result.output
-                        )
                         tool_results.append(
                             ToolResultBlock(
                                 tool_use_id=tc.tool_id,
-                                content=content,
+                                content=result.output,
                                 is_error=result.is_error,
                             )
                         )
@@ -821,7 +792,9 @@ class Agent:
             exit_plan_called = any(
                 tc.tool_name == "ExitPlanMode" for tc in response.tool_calls
             )
-            conversation.add_tool_results_message(tool_results)
+            conversation.add_tool_results_message(
+                prepare_tool_results(tool_results, self.session_dir)
+            )
 
             # 非阻塞 memory recall：工具执行完后检查 prefetch 是否就绪
             if self.memory_recall_task and not self._memory_recall_consumed:
@@ -1177,10 +1150,8 @@ class Agent:
     async def manual_compact(
         self, conversation: ConversationManager
     ) -> CompactNotification | ErrorEvent:
-        # auto_compact 会用摘要替换 conversation.history，所有 tool-result 内容
-        # （原始或已替换的）都将被丢弃。这里跳过 apply_tool_result_budget —
-        # 它在主循环中的唯一目的是为 LLM 调用生成 api_conv，而本路径不需要
-        # 发起看到替换结果的 LLM 调用（auto_compact 内部的摘要调用操作的是原始对话）。
+        # auto_compact 会用摘要替换 conversation.history，旧 Epoch 的工具结果
+        # 不会再直接发送给模型。
         result = await auto_compact(
             conversation,
             self.client,
@@ -1259,13 +1230,6 @@ class Agent:
                 for note in self.notification_fn():
                     conversation.add_system_reminder(note)
 
-            # 对齐 Claude Code：先应用 tool-result budget（就地修改），再做 auto-compact
-            pre_compact_records = apply_tool_result_budget(
-                conversation, self.session_dir, self.replacement_state
-            )
-            if pre_compact_records:
-                append_replacement_records(self.session_dir, pre_compact_records)
-
             compact_result = await auto_compact(
                 conversation,
                 self.client,
@@ -1288,13 +1252,6 @@ class Agent:
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
                     + "\n".join(deferred_names)
                 )
-
-            # 压缩后或追加 deferred 提示后重新应用 budget（就地修改）
-            _new_records = apply_tool_result_budget(
-                conversation, self.session_dir, self.replacement_state
-            )
-            if _new_records:
-                append_replacement_records(self.session_dir, _new_records)
 
             collector = StreamCollector()
             model_call_id = uuid.uuid4().hex
@@ -1402,16 +1359,17 @@ class Agent:
                         "args": tc.arguments,
                     })
                 result = await self._execute_tool_noninteractive(tc)
-                content = self._maybe_persist_or_truncate(tc.tool_id, result.output)
                 tool_results.append(
                     ToolResultBlock(
                         tool_use_id=tc.tool_id,
-                        content=content,
+                        content=result.output,
                         is_error=result.is_error,
                     )
                 )
 
-            conversation.add_tool_results_message(tool_results)
+            conversation.add_tool_results_message(
+                prepare_tool_results(tool_results, self.session_dir)
+            )
 
             if self.hook_engine:
                 ctx = self._build_hook_context("turn_end")
@@ -1511,17 +1469,3 @@ class Agent:
             await self.hook_engine.run_hooks("post_tool_use", hook_ctx)
 
         return finish(result)
-
-    def _maybe_persist_or_truncate(self, tool_use_id: str, text: str) -> str:
-        from lantu.context.manager import (
-            SINGLE_RESULT_CHAR_LIMIT,
-            make_persisted_preview,
-            persist_tool_result,
-        )
-
-        if len(text) > SINGLE_RESULT_CHAR_LIMIT:
-            fp = persist_tool_result(tool_use_id, text, self.session_dir)
-            return make_persisted_preview(text, fp)
-        if len(text) > MAX_OUTPUT_CHARS:
-            return text[:MAX_OUTPUT_CHARS] + "\n… (output truncated)"
-        return text

@@ -244,8 +244,8 @@ class AnthropicClient(LLMClient):
 
         # 在最长稳定前缀上标记 prompt cache 断点：system、tools
         # 以及最后一条 user 消息的尾部。Anthropic 会缓存到每个断点，
-        # 并在下次请求时按字节比对——context.manager 中的
-        # ContentReplacementState 保证断点之后的 tool_result 内容保持稳定。
+        # 并在下次请求时按字节比对。工具结果在进入 conversation 前已经固定，
+        # 后续请求不会再改写旧的 tool_result。
         _mark_last_user_tail_for_cache(messages)
 
         kwargs: dict[str, Any] = {
