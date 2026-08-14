@@ -23,14 +23,19 @@ from harbor.agents.model_connection import ModelConnectionSpec
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
-from .parser import parse_metrics
+from .install import (
+    container_proxy_url,
+    discover_host_proxy,
+    prepare_ca_bundle,
+    prepare_install_assets,
+    proxy_env,
+)
+from .parser import build_task_instruction, parse_metrics
 
 
 LANTU_REPOSITORY = "https://github.com/hcygit1/LANTU.git"
 LANTU_COMMIT = "00a4ea0317c14c2c44cfc736a85408157a016442"
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-
-
 class LantuAgent(BaseInstalledAgent):
     """Run the LANTU CLI in non-interactive, stream-json mode."""
 
@@ -46,16 +51,46 @@ class LantuAgent(BaseInstalledAgent):
     @override
     async def install(self, environment: BaseEnvironment) -> None:
         """Install uv and the pinned LANTU revision for reproducible trials."""
-        await self.ensure_system_dependencies(environment, ("curl", "git"))
+        host_proxy = discover_host_proxy(self._get_env)
+        container_proxy = (
+            host_proxy.replace("127.0.0.1", "host.docker.internal")
+            .replace("localhost", "host.docker.internal")
+            if host_proxy
+            else None
+        )
+        uv_binary, source_archive = prepare_install_assets(
+            Path(__file__).resolve().parents[2], LANTU_COMMIT, host_proxy
+        )
+        await environment.upload_file(uv_binary, "/tmp/lantu-uv")
+        await environment.upload_file(source_archive, "/tmp/lantu-source.tar")
+        await environment.upload_file(prepare_ca_bundle(), "/tmp/lantu-ca-bundle.pem")
+        install_env = proxy_env(container_proxy)
+        install_env.update(
+            {
+                "SSL_CERT_FILE": "/tmp/lantu-ca-bundle.pem",
+                "REQUESTS_CA_BUNDLE": "/tmp/lantu-ca-bundle.pem",
+                "CURL_CA_BUNDLE": "/tmp/lantu-ca-bundle.pem",
+                "UV_TLS_CACERT": "/tmp/lantu-ca-bundle.pem",
+            }
+        )
+        # Harbor merges this environment into every later exec, including the
+        # task verifier, so all phases share one proxy configuration.
+        environment._persistent_env.update(install_env)
+        install_env["UV_HTTP_TIMEOUT"] = "60"
         await self.exec_as_agent(
             environment,
             command=(
                 "set -euo pipefail; "
-                "curl -LsSf https://astral.sh/uv/install.sh | sh; "
+                "chmod +x /tmp/lantu-uv; "
+                "rm -rf /tmp/lantu-source; mkdir -p /tmp/lantu-source; "
+                "tar -xf /tmp/lantu-source.tar -C /tmp/lantu-source; "
+                "timeout 300 /tmp/lantu-uv tool install --force "
+                "--from /tmp/lantu-source lantu; "
                 'export PATH="$HOME/.local/bin:$PATH"; '
-                f"uv tool install --force --from git+{LANTU_REPOSITORY}@{LANTU_COMMIT} lantu; "
                 "lantu --help >/dev/null"
             ),
+            env=install_env,
+            timeout_sec=360,
         )
 
     @override
@@ -89,18 +124,29 @@ class LantuAgent(BaseInstalledAgent):
                     "base_url": base_url,
                     "model": model,
                     "api_key": "${LANTU_API_KEY}",
+                    "reasoning_effort": "low",
                     "max_output_tokens": 32000,
                 }
             ],
             "permission_mode": "bypassPermissions",
         }
-        env = {**access.env, "LANTU_API_KEY": api_key}
+        host_proxy = discover_host_proxy(self._get_env)
+        container_proxy = container_proxy_url(host_proxy) if host_proxy else None
+        await environment.upload_file(prepare_ca_bundle(), "/tmp/lantu-ca-bundle.pem")
+        env = {
+            **access.env,
+            **proxy_env(container_proxy),
+            "SSL_CERT_FILE": "/tmp/lantu-ca-bundle.pem",
+            "REQUESTS_CA_BUNDLE": "/tmp/lantu-ca-bundle.pem",
+            "CURL_CA_BUNDLE": "/tmp/lantu-ca-bundle.pem",
+            "LANTU_API_KEY": api_key,
+        }
         config_text = json.dumps(config, ensure_ascii=False)
         write_config = (
             f"mkdir -p {shlex.quote(config_home + '/.lantu')}; "
             f"printf '%s' {shlex.quote(config_text)} > {shlex.quote(config_path)}"
         )
-        escaped_instruction = shlex.quote(instruction)
+        escaped_instruction = shlex.quote(build_task_instruction(instruction))
 
         await self.exec_as_agent(
             environment,

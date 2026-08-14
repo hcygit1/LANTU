@@ -313,7 +313,7 @@ async def test_tool_phase_does_not_restore_completed_thinking():
 
 
 @pytest.mark.asyncio
-async def test_stream_thinking_and_usage_update_live_state_snapshots():
+async def test_stream_thinking_is_hidden_and_usage_updates_live_state():
     live = FakeLiveRenderer()
     handler = InlineEventHandler(live, FakeTranscript())
 
@@ -323,9 +323,21 @@ async def test_stream_thinking_and_usage_update_live_state_snapshots():
 
     assert [state.assistant_text for state in live.states[:2]] == ["答", "答"]
     assert live.states[0].thinking_text == ""
-    assert live.states[1].thinking_text == "思"
+    assert live.states[1].thinking_text == ""
     assert live.states[-1].input_tokens == 120
     assert live.states[-1].output_tokens == 45
+
+
+@pytest.mark.asyncio
+async def test_waiting_state_hides_raw_thinking_content():
+    live = FakeLiveRenderer()
+    handler = InlineEventHandler(live, FakeTranscript())
+
+    handler.start_waiting()
+    await handler.handle(ThinkingText("private reasoning"))
+
+    assert live.states[-1].is_waiting is True
+    assert live.states[-1].thinking_text == ""
 
 
 @pytest.mark.asyncio
@@ -361,12 +373,16 @@ async def test_static_system_events_stop_live_before_writing_transcript():
     assert events == [
         "live.stop",
         "system:↻ Retrying: 网络繁忙",
+        "live.update",
         "live.stop",
         "system:Hook [format] ✓ 完成",
+        "live.update",
         "live.stop",
         "system:Hook [lint] ✗ 失败",
+        "live.update",
         "live.stop",
         "system:上下文已压缩",
+        "live.update",
     ]
 
 

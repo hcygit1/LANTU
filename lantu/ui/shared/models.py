@@ -28,5 +28,6 @@ class LiveViewState:
     thinking_text: str = ""
     tools: dict[str, ToolViewState] = field(default_factory=dict)
     status_text: str = ""
+    is_waiting: bool = False
     input_tokens: int = 0
     output_tokens: int = 0

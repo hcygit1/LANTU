@@ -78,3 +78,46 @@ async def test_openai_compat_preserves_output_length_stop_reason() -> None:
 
     end = next(event for event in events if isinstance(event, StreamEnd))
     assert end.stop_reason == "max_tokens"
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_passes_reasoning_effort_in_extra_body() -> None:
+    provider = ProviderConfig(
+        name="bailian",
+        protocol="openai-compat",
+        base_url="https://example.com/v1",
+        model="glm-5.2",
+        api_key="test-key",
+        reasoning_effort="low",
+    )
+    client = OpenAICompatClient(provider)
+    captured: dict = {}
+
+    async def response_stream():
+        yield SimpleNamespace(
+            choices=[],
+            usage=SimpleNamespace(
+                prompt_tokens=1,
+                completion_tokens=1,
+                prompt_tokens_details=None,
+            ),
+        )
+
+    async def create(**kwargs):
+        captured.update(kwargs)
+        return response_stream()
+
+    original_client = client._client
+    client._client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+    )
+    try:
+        _ = [event async for event in client.stream(ConversationManager())]
+    finally:
+        client._client = original_client
+        await client.aclose()
+
+    assert captured["extra_body"] == {
+        "enable_thinking": True,
+        "reasoning_effort": "low",
+    }

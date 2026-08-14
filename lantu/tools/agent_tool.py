@@ -660,6 +660,7 @@ class AgentTool(Tool):
             base_url=self._provider_config.base_url,
             model=model_id,
             api_key=self._provider_config.api_key,
+            reasoning_effort=self._provider_config.reasoning_effort,
             context_window=self._provider_config.context_window,
         )
         try:

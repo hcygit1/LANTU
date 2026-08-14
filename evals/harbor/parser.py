@@ -8,6 +8,21 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+TASK_COMPLETION_BOUNDARY = """
+
+Evaluation boundary:
+- Complete only the requested task.
+- Once the requested output file or change is correct, stop immediately.
+- Do not add extra tests, create unrelated files, or continue exploring after completion.
+- Before stopping, make sure the requested output has been saved in the exact path from the task.
+""".strip()
+
+
+def build_task_instruction(instruction: str) -> str:
+    """Add a clear stopping boundary to benchmark instructions."""
+    return f"{instruction.rstrip()}\n\n{TASK_COMPLETION_BOUNDARY}"
+
+
 @dataclass(frozen=True)
 class LantuMetrics:
     input_tokens: int = 0

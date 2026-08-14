@@ -27,6 +27,9 @@ def render_permission_request(
             ("  描述: ", DEFAULT_THEME.muted),
             (_safe(description, preserve_newlines=True), DEFAULT_THEME.text),
         ),
+        Text("  1 允许一次", style=DEFAULT_THEME.muted),
+        Text("  2 始终允许", style=DEFAULT_THEME.muted),
+        Text("  3 拒绝", style=DEFAULT_THEME.muted),
     )
 
 

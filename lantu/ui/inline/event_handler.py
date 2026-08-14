@@ -36,9 +36,16 @@ class InlineEventHandler:
         self.live = live
         self.transcript = transcript
         self.permission_handler = permission_handler
-        self.state = LiveViewState(status_text="正在思考")
+        self.state = LiveViewState()
         self.last_tool: ToolViewState | None = None
         self._completed_tool_ids: set[str] = set()
+        self._turn_failed = False
+
+    def start_waiting(self) -> None:
+        self._turn_failed = False
+        self.state.is_waiting = True
+        self.state.thinking_text = ""
+        self.live.update(self.state)
 
     def _commit_assistant(self) -> None:
         content = self.state.assistant_text.strip()
@@ -49,10 +56,12 @@ class InlineEventHandler:
 
     async def handle(self, event: AgentEvent) -> None:
         if isinstance(event, StreamText):
+            self.state.is_waiting = False
             self.state.assistant_text += event.text
         elif isinstance(event, ThinkingText):
-            self.state.thinking_text += event.text
+            pass
         elif isinstance(event, ToolUseEvent):
+            self.state.is_waiting = False
             self._commit_assistant()
             self.state.thinking_text = ""
             self._completed_tool_ids.discard(event.tool_id)
@@ -78,6 +87,7 @@ class InlineEventHandler:
             self.state.input_tokens = event.input_tokens
             self.state.output_tokens = event.output_tokens
         elif isinstance(event, RetryEvent):
+            self.state.is_waiting = True
             self.live.stop()
             self.transcript.system_message(f"↻ Retrying: {event.reason}")
         elif isinstance(event, HookEvent):
@@ -90,6 +100,8 @@ class InlineEventHandler:
             self.live.stop()
             self.transcript.system_message(event.message)
         elif isinstance(event, ErrorEvent):
+            self._turn_failed = True
+            self.state.is_waiting = False
             self._commit_assistant()
             self.state.thinking_text = ""
             self.state.tools.clear()
@@ -97,6 +109,7 @@ class InlineEventHandler:
             self.transcript.error_message(event.message)
             return
         elif isinstance(event, PermissionRequest):
+            self.state.is_waiting = False
             self.live.stop()
             if self.permission_handler is None:
                 raise RuntimeError("Permission handler is not configured")
@@ -106,9 +119,12 @@ class InlineEventHandler:
             return
         elif isinstance(event, TurnComplete):
             self.state.thinking_text = ""
+            if self._turn_failed:
+                self.live.stop()
+                return
+            self.state.is_waiting = True
             self.live.stop()
-            if self.state.assistant_text:
-                self.live.update(self.state)
+            self.live.update(self.state)
             return
         else:
             log.debug("Unknown agent event: %r", event)
@@ -117,12 +133,15 @@ class InlineEventHandler:
             self.state.assistant_text
             or self.state.thinking_text
             or self.state.tools
+            or self.state.is_waiting
         ):
             self.live.update(self.state)
 
     def finish(self) -> None:
         self._commit_assistant()
         self.state.thinking_text = ""
+        self.state.is_waiting = False
         self.state.tools.clear()
         self._completed_tool_ids.clear()
+        self._turn_failed = False
         self.live.stop()

@@ -1,4 +1,5 @@
 from rich.console import Group, RenderableType
+from rich.spinner import Spinner
 from rich.text import Text
 
 from lantu.ui.inline.components.message import render_assistant_message
@@ -10,6 +11,10 @@ from lantu.ui.shared.theme import DEFAULT_THEME
 
 def render_live_state(state: LiveViewState) -> RenderableType:
     sections: list[RenderableType] = []
+    if state.is_waiting:
+        sections.append(
+            Spinner("dots", " 正在思考...", style=DEFAULT_THEME.muted)
+        )
     if state.thinking_text:
         thinking = sanitize_terminal_text(
             state.thinking_text,

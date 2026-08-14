@@ -40,7 +40,7 @@ from lantu.ui.shared.formatting import format_tokens
 from lantu.ui.shared.references import expand_at_refs
 
 
-PERMISSION_CHOICES = ["allow", "always", "deny"]
+PERMISSION_CHOICES = ["1", "2", "3", "allow", "always", "deny"]
 PLAN_CHOICES = ["yolo", "manual", "feedback"]
 MAX_PLAN_CONTENT = 64 * 1024
 NOTIFICATION_POLL_INTERVAL = 0.1
@@ -95,6 +95,7 @@ class InlineApp:
         self._agent_task: asyncio.Task[None] | None = None
         self._turn_cancel_requested = False
         self._processing_notifications = False
+        self._pending_session_messages: list[Message] = []
         self._has_exited_plan_mode = False
         self._command_config: dict[str, Any] = {}
 
@@ -256,6 +257,11 @@ class InlineApp:
             )
             turn_open = True
 
+            if self._pending_session_messages:
+                for message in self._pending_session_messages:
+                    self.runtime.session.append(message)
+                self._pending_session_messages.clear()
+
             if text and "@" in text:
                 text = expand_at_refs(text, self.agent.work_dir)
 
@@ -277,6 +283,7 @@ class InlineApp:
                 self.agent.memory_recall_task = prefetch_task
                 self.agent._memory_recall_consumed = False
 
+            self.events.start_waiting()
             async for event in self.agent.run(self.runtime.conversation):
                 if not agent_started:
                     for message in self.runtime.conversation.history:
@@ -414,8 +421,9 @@ class InlineApp:
                 self.runtime.conversation.add_system_reminder(note)
 
             if completed or notes:
-                for message in self.runtime.conversation.history[history_boundary:]:
-                    self.runtime.session.append(message)
+                self._pending_session_messages.extend(
+                    self.runtime.conversation.history[history_boundary:]
+                )
                 await self.run_prompt("", is_notification=True)
         finally:
             self._processing_notifications = False
@@ -429,15 +437,17 @@ class InlineApp:
         selection = "deny"
         response = PermissionResponse.DENY
         try:
-            choice = await self.prompt.choose("选择", PERMISSION_CHOICES)
+            choice = await self.prompt.choose("请输入 1、2 或 3", PERMISSION_CHOICES)
             responses = {
-                "allow": PermissionResponse.ALLOW,
-                "always": PermissionResponse.ALLOW_ALWAYS,
-                "deny": PermissionResponse.DENY,
+                "1": ("allow", PermissionResponse.ALLOW),
+                "2": ("always", PermissionResponse.ALLOW_ALWAYS),
+                "3": ("deny", PermissionResponse.DENY),
+                "allow": ("allow", PermissionResponse.ALLOW),
+                "always": ("always", PermissionResponse.ALLOW_ALWAYS),
+                "deny": ("deny", PermissionResponse.DENY),
             }
             if choice in responses:
-                selection = choice
-                response = responses[choice]
+                selection, response = responses[choice]
         except (KeyboardInterrupt, EOFError):
             pass
         finally:

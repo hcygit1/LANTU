@@ -433,7 +433,10 @@ class TeamManager:
     def _remaining_timeout(deadline: float | None, timeout: float) -> float:
         if deadline is None:
             return timeout
-        return max(0.0, min(timeout, deadline - time.monotonic()))
+        # Reserve a tiny margin so subprocess timeout never extends past the
+        # caller's deadline due to monotonic-clock precision.
+        safety_margin = 1e-6
+        return max(0.0, min(timeout, deadline - time.monotonic() - safety_margin))
 
     def _cleanup_worktree(
         self,

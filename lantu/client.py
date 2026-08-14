@@ -532,6 +532,7 @@ class OpenAICompatClient(LLMClient):
     def __init__(self, config: ProviderConfig) -> None:
         self.model = config.model
         self.max_output_tokens = config.get_max_output_tokens()
+        self.reasoning_effort = config.reasoning_effort
         api_key = config.resolve_api_key()
         if not api_key:
             raise AuthenticationError(
@@ -595,6 +596,11 @@ class OpenAICompatClient(LLMClient):
         }
         if tools:
             kwargs["tools"] = self._convert_tools(tools)
+        if self.reasoning_effort:
+            kwargs["extra_body"] = {
+                "enable_thinking": True,
+                "reasoning_effort": self.reasoning_effort,
+            }
 
         # 用于累积 streaming tool call 的状态。Chat Completions 流按
         # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。

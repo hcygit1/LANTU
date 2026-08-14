@@ -57,7 +57,8 @@ def test_team_cleanup_limits_git_timeout_to_deadline(monkeypatch) -> None:
 
     manager._cleanup_worktree("/tmp/fake-worktree", deadline=deadline, timeout=10)
 
-    assert 0 < timeouts[0] <= 0.05
+    # Monotonic clock arithmetic can exceed the nominal deadline by a few ns.
+    assert 0 < timeouts[0] <= 0.05 + 1e-6
     with pytest.raises(TeamError):
         manager.delete_team("missing", deadline=deadline, timeout=10)
 

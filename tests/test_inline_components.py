@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from io import StringIO
+from pathlib import Path
 
 import pytest
 from rich.console import Console
@@ -101,7 +102,7 @@ def test_header_uses_pixel_wordmark_on_wide_terminal():
 
     assert "█▀█" in text
     assert "0.2.0 · deepseek-chat · default" in text
-    assert "/tmp/project" in text
+    assert str(Path("/tmp/project")) in text
 
 
 def test_header_falls_back_on_narrow_terminal():
@@ -391,6 +392,12 @@ def test_live_state_accepts_deserialized_running_status():
     state = LiveViewState(tools={"t1": tool})
 
     assert "ReadFile config.py" in render_text(render_live_state(state))
+
+
+def test_live_state_renders_waiting_spinner_label():
+    text = render_text(render_live_state(LiveViewState(is_waiting=True)))
+
+    assert "正在思考..." in text
 
 
 def test_transcript_prints_committed_content_once_with_spacing_and_boundary():

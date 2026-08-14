@@ -32,6 +32,7 @@ from lantu.tools.base import (
     StreamEnd,
     StreamEvent,
     TextDelta,
+    ThinkingComplete,
     Tool,
     ToolCallComplete,
     ToolResult,
@@ -48,6 +49,7 @@ class MockLLMClient(LLMClient):
         self._yield_control = yield_control
         self.systems: list[str] = []
         self.message_snapshots: list[list] = []
+        self.tool_snapshots: list[list[dict[str, Any]]] = []
 
     async def stream(
         self,
@@ -57,6 +59,7 @@ class MockLLMClient(LLMClient):
     ) -> AsyncIterator[StreamEvent]:
         self.systems.append(system)
         self.message_snapshots.append(deepcopy(conversation.get_messages()))
+        self.tool_snapshots.append(deepcopy(tools or []))
         if self._call_index >= len(self._responses):
             yield TextDelta(text="No more responses")
             yield StreamEnd(stop_reason="end_turn", input_tokens=1, output_tokens=1)
@@ -278,6 +281,190 @@ async def test_run_to_completion_appends_hook_prompt_to_messages():
 
 
 @pytest.mark.asyncio
+async def test_run_to_completion_refreshes_tools_after_tool_search(tmp_path):
+    class Params(BaseModel):
+        value: str = ""
+
+    class DeferredTool(Tool):
+        name = "DeferredTool"
+        description = "A deferred test tool"
+        params_model = Params
+        should_defer = True
+
+        async def execute(self, params: Params) -> ToolResult:
+            return ToolResult(output=params.value)
+
+    client = MockLLMClient([
+        [
+            ToolCallComplete(
+                "search-1",
+                "ToolSearch",
+                {"query": "select:DeferredTool"},
+            ),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(DeferredTool())
+    from lantu.tools.impl.tool_search import ToolSearchTool
+
+    registry.register(ToolSearchTool(registry, protocol="anthropic"))
+    agent = Agent(
+        client,
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+
+    result = await agent.run_to_completion("load the deferred tool")
+
+    assert result == "done"
+    assert "DeferredTool" not in {tool["name"] for tool in client.tool_snapshots[0]}
+    assert "DeferredTool" in {tool["name"] for tool in client.tool_snapshots[1]}
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_continues_after_output_limit(tmp_path):
+    client = MockLLMClient([
+        [
+            TextDelta("first half "),
+            StreamEnd("max_tokens", input_tokens=5, output_tokens=2),
+        ],
+        [
+            TextDelta("second half"),
+            StreamEnd("end_turn", input_tokens=8, output_tokens=2),
+        ],
+    ])
+    agent = Agent(
+        client,
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+
+    result = await agent.run_to_completion("finish the response")
+
+    assert result == "first half second half"
+    assert len(client.message_snapshots) == 2
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_preserves_thinking_blocks(tmp_path):
+    client = MockLLMClient([[
+        ThinkingComplete("inspect the repository", "signature-1"),
+        TextDelta("done"),
+        StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+    ]])
+    conversation = ConversationManager()
+    agent = Agent(
+        client,
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+
+    await agent.run_to_completion("analyze", conversation)
+
+    assistant = conversation.history[-1]
+    assert assistant.content == "done"
+    assert len(assistant.thinking_blocks) == 1
+    assert assistant.thinking_blocks[0].thinking == "inspect the repository"
+    assert assistant.thinking_blocks[0].signature == "signature-1"
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_runs_safe_tools_concurrently(tmp_path):
+    class Params(BaseModel):
+        pass
+
+    active = 0
+    max_active = 0
+
+    class ConcurrentTool(Tool):
+        name = "ConcurrentTool"
+        description = "A concurrency-safe test tool"
+        params_model = Params
+        is_concurrency_safe = True
+
+        async def execute(self, params: Params) -> ToolResult:
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return ToolResult(output="done")
+
+    client = MockLLMClient([
+        [
+            ToolCallComplete("tool-1", "ConcurrentTool", {}),
+            ToolCallComplete("tool-2", "ConcurrentTool", {}),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(ConcurrentTool())
+    agent = Agent(
+        client,
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+
+    await agent.run_to_completion("run both tools")
+
+    assert max_active == 2
+
+
+@pytest.mark.asyncio
+async def test_run_to_completion_preserves_callback_order(tmp_path):
+    class Params(BaseModel):
+        pass
+
+    class EchoTool(Tool):
+        name = "EchoTool"
+        description = "Return a fixed result"
+        params_model = Params
+
+        async def execute(self, params: Params) -> ToolResult:
+            return ToolResult(output="ok")
+
+    client = MockLLMClient([
+        [
+            TextDelta("working"),
+            ToolCallComplete("tool-1", "EchoTool", {}),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(EchoTool())
+    agent = Agent(
+        client,
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+    callback_events: list[dict[str, Any]] = []
+
+    await agent.run_to_completion(
+        "run the tool",
+        event_callback=callback_events.append,
+    )
+
+    assert [event["type"] for event in callback_events] == [
+        "usage",
+        "stream_text",
+        "tool_use",
+        "usage",
+        "stream_text",
+    ]
+    assert callback_events[1]["text"] == "working"
+    assert callback_events[-1]["text"] == "done"
+
+
+@pytest.mark.asyncio
 async def test_run_to_completion_finalizes_tool_result_once(tmp_path):
     class Params(BaseModel):
         pass
@@ -347,23 +534,36 @@ async def test_noninteractive_tool_execution_records_journal_events(tmp_path):
     target = tmp_path / "sample.txt"
     target.write_text("hello", encoding="utf-8")
     session = RecordingSession()
+    client = MockLLMClient([
+        [
+            ToolCallComplete(
+                "tool_1",
+                "ReadFile",
+                {"file_path": str(target)},
+            ),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
     agent = Agent(
-        MockLLMClient([]),
+        client,
         create_default_registry(work_dir=str(tmp_path)),
         "anthropic",
         work_dir=str(tmp_path),
         session=session,
     )
 
-    result = await agent._execute_tool_noninteractive(
-        ToolCallComplete("tool_1", "ReadFile", {"file_path": str(target)})
-    )
+    result = await agent.run_to_completion("read the file")
 
-    assert result.is_error is False
-    assert [event.event_type for event in session.events] == [
+    assert result == "done"
+    tool_events = [
+        event for event in session.events if event.event_type.startswith("tool.")
+    ]
+    assert [event.event_type for event in tool_events] == [
         "tool.started",
         "tool.completed",
     ]
+    assert "hello" in tool_events[-1].payload["output"]
 
 
 @pytest.mark.asyncio

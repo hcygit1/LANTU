@@ -127,6 +127,27 @@ class FakeSession:
         self.records: list[Any] = []
         self.meta = SimpleNamespace(total_tokens=0)
         self.closed = False
+        self.runtime_id: str | None = None
+        self.turn_id: str | None = None
+
+    def start_runtime(self, mode: str) -> str:
+        self.runtime_id = f"runtime-{mode}"
+        return self.runtime_id
+
+    def start_turn(self, trigger: str) -> str:
+        if self.runtime_id is None:
+            raise RuntimeError("runtime is not active")
+        self.turn_id = f"turn-{trigger}"
+        return self.turn_id
+
+    def complete_turn(self, iteration_count: int) -> None:
+        self.turn_id = None
+
+    def interrupt_turn(self, reason: str) -> None:
+        self.turn_id = None
+
+    def context_compacted(self, summary: str, keep: list[Message]) -> None:
+        self.records.append(SimpleNamespace(content={"summary": summary}))
 
     def append(self, message: Message) -> None:
         self.messages.append(message)
@@ -228,6 +249,7 @@ class FakeRuntime:
         self.conversation = ConversationManager()
         self.command_registry = CommandRegistry()
         self.session = FakeSession()
+        self.session.start_runtime("new")
         self.session_manager = SimpleNamespace()
         self.memory_manager = SimpleNamespace()
         self.skill_loader = SimpleNamespace()
@@ -312,6 +334,34 @@ async def test_run_sends_prompt_renders_response_and_closes_runtime(tmp_path: Pa
 
 
 @pytest.mark.asyncio
+async def test_run_prompt_shows_waiting_state_before_first_agent_event(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    live = FakeLive()
+    app = make_app(runtime, live=live)
+    agent_started = asyncio.Event()
+    release_agent = asyncio.Event()
+
+    async def delayed_run(conversation: ConversationManager):
+        agent_started.set()
+        await release_agent.wait()
+        yield StreamText("done")
+        yield LoopComplete(1)
+
+    runtime.agent.run = delayed_run  # type: ignore[method-assign]
+    task = asyncio.create_task(app.run_prompt("hello"))
+    await agent_started.wait()
+
+    try:
+        assert live.states
+        assert live.states[-1].is_waiting is True
+    finally:
+        release_agent.set()
+        await task
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("choice", "expected_response", "expected_audit"),
     [
@@ -366,6 +416,26 @@ async def test_handle_permission_audits_default_deny_after_cancel(
 
     assert future.result() is PermissionResponse.DENY
     assert transcript.system_messages == ["权限选择: deny"]
+
+
+@pytest.mark.asyncio
+async def test_handle_permission_shows_and_accepts_numbered_choices(
+    tmp_path: Path,
+) -> None:
+    runtime = FakeRuntime(tmp_path)
+    prompt = FakePrompt(choices=["2"])
+    transcript = FakeTranscript()
+    app = make_app(runtime, prompt=prompt, transcript=transcript)
+    future = asyncio.get_running_loop().create_future()
+
+    await app.handle_permission(PermissionRequest("Bash", "rm file", future))
+
+    rendered = render_text(transcript.commits[0][0])
+    assert "1" in rendered and "允许一次" in rendered
+    assert "2" in rendered and "始终允许" in rendered
+    assert "3" in rendered and "拒绝" in rendered
+    assert "1、2 或 3" in prompt.choose_calls[0][0]
+    assert future.result() is PermissionResponse.ALLOW_ALWAYS
 
 
 @pytest.mark.asyncio
@@ -703,6 +773,7 @@ async def test_real_agent_session_persists_only_user_and_assistant_once(
     runtime.conversation = ConversationManager()
     manager = SessionManager(str(tmp_path))
     session = manager.create()
+    session.start_runtime("new")
     runtime.session_manager = manager
     runtime.session = session
     runtime.mcp_instructions = "MCP system reminder"
@@ -1358,6 +1429,7 @@ async def test_notifications_are_persisted_once_with_follow_up_reply(
     runtime.team_manager = FakeTeamManager([mailbox_notes])
     manager = SessionManager(str(tmp_path))
     session = manager.create()
+    session.start_runtime("new")
     runtime.session_manager = manager
     runtime.session = session
     app = make_app(runtime)
@@ -1435,6 +1507,7 @@ async def test_resumed_session_tokens_become_next_turn_baseline(tmp_path: Path) 
     runtime = FakeRuntime(tmp_path)
     app = make_app(runtime)
     resumed_session = FakeSession("resumed-session")
+    resumed_session.start_runtime("resume")
     resumed_session.meta.total_tokens = 120
     app.build_command_context("").config["set_session"](resumed_session)
 

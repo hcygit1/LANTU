@@ -12,6 +12,7 @@ VALID_PERMISSION_MODES = {
 }
 
 VALID_TEAMMATE_MODES = {"", "in-process"}
+VALID_REASONING_EFFORTS = {"", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
 DEFAULT_CONTEXT_WINDOW = 200_000
 
@@ -81,6 +82,13 @@ def validate_providers(raw_providers: list) -> list[dict]:
         if not isinstance(thinking, bool):
             raise ConfigError(f"Provider #{i + 1}: thinking must be a boolean")
 
+        reasoning_effort = entry.get("reasoning_effort", "")
+        if not isinstance(reasoning_effort, str) or reasoning_effort not in VALID_REASONING_EFFORTS:
+            raise ConfigError(
+                f"Provider #{i + 1}: reasoning_effort must be one of: "
+                f"{', '.join(sorted(value for value in VALID_REASONING_EFFORTS if value))}"
+            )
+
         max_output_tokens = entry.get("max_output_tokens", 0)
         if not isinstance(max_output_tokens, int) or max_output_tokens < 0:
             raise ConfigError(
@@ -95,6 +103,7 @@ def validate_providers(raw_providers: list) -> list[dict]:
                 "model": entry["model"],
                 "api_key": entry.get("api_key", ""),
                 "thinking": thinking,
+                "reasoning_effort": reasoning_effort,
                 "context_window": context_window,
                 "max_output_tokens": max_output_tokens,
             }

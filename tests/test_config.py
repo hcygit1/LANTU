@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from lantu.config import ProviderConfig
+from lantu.validator import ConfigError, validate_providers
 
 
 def make_provider(api_key: str) -> ProviderConfig:
@@ -58,3 +59,30 @@ def test_openai_compat_empty_api_key_uses_protocol_environment(monkeypatch) -> N
     monkeypatch.setenv("OPENAI_API_KEY", "fallback-key")
 
     assert make_provider("").resolve_api_key() == "fallback-key"
+
+
+def test_validate_provider_accepts_low_reasoning_effort() -> None:
+    providers = validate_providers(
+        [{
+            "name": "bailian",
+            "protocol": "openai-compat",
+            "base_url": "https://example.com/v1",
+            "model": "glm-5.2",
+            "reasoning_effort": "low",
+        }]
+    )
+
+    assert providers[0]["reasoning_effort"] == "low"
+
+
+def test_validate_provider_rejects_unknown_reasoning_effort() -> None:
+    with pytest.raises(ConfigError, match="reasoning_effort"):
+        validate_providers(
+            [{
+                "name": "bailian",
+                "protocol": "openai-compat",
+                "base_url": "https://example.com/v1",
+                "model": "glm-5.2",
+                "reasoning_effort": "extreme",
+            }]
+        )
