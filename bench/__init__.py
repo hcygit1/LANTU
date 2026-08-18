@@ -1,0 +1,1 @@
+"""Lantu benchmark scripts."""

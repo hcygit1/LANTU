@@ -1,0 +1,395 @@
+{
+  "meta": {
+    "root": "D:\\code\\LANTU",
+    "mode": "standard",
+    "repo_map": "disabled",
+    "network": false,
+    "token_estimator": "serialized characters / 3.5",
+    "reusable_prefix_is_prediction": true
+  },
+  "main": {
+    "turns": 12,
+    "model_requests": 24,
+    "prompt_tokens": 368692,
+    "reusable_prefix_tokens": 341295,
+    "reusable_prefix_fraction": 0.9257,
+    "duplicate_reads_avoided": 2,
+    "persisted_tool_results": 1,
+    "compactions": [],
+    "compaction_recovery": [],
+    "ledger_file_entries": 6,
+    "usage_events": 24,
+    "errors": [],
+    "requests": [
+      {
+        "kind": "model",
+        "prompt_chars": 11562,
+        "prompt_tokens": 3303,
+        "reusable_prefix_chars": 0,
+        "reusable_prefix_tokens": 0
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 12230,
+        "prompt_tokens": 3494,
+        "reusable_prefix_chars": 11560,
+        "reusable_prefix_tokens": 3302
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 12521,
+        "prompt_tokens": 3577,
+        "reusable_prefix_chars": 12228,
+        "reusable_prefix_tokens": 3493
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 23175,
+        "prompt_tokens": 6621,
+        "reusable_prefix_chars": 12519,
+        "reusable_prefix_tokens": 3576
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 23488,
+        "prompt_tokens": 6710,
+        "reusable_prefix_chars": 23173,
+        "reusable_prefix_tokens": 6620
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 32142,
+        "prompt_tokens": 9183,
+        "reusable_prefix_chars": 23486,
+        "reusable_prefix_tokens": 6710
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 32459,
+        "prompt_tokens": 9274,
+        "reusable_prefix_chars": 32140,
+        "reusable_prefix_tokens": 9182
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 32908,
+        "prompt_tokens": 9402,
+        "reusable_prefix_chars": 32457,
+        "reusable_prefix_tokens": 9273
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 33202,
+        "prompt_tokens": 9486,
+        "reusable_prefix_chars": 32906,
+        "reusable_prefix_tokens": 9401
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 44343,
+        "prompt_tokens": 12669,
+        "reusable_prefix_chars": 33200,
+        "reusable_prefix_tokens": 9485
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 44639,
+        "prompt_tokens": 12754,
+        "reusable_prefix_chars": 44341,
+        "reusable_prefix_tokens": 12668
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 53158,
+        "prompt_tokens": 15188,
+        "reusable_prefix_chars": 44637,
+        "reusable_prefix_tokens": 12753
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 53466,
+        "prompt_tokens": 15276,
+        "reusable_prefix_chars": 53156,
+        "reusable_prefix_tokens": 15187
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 61861,
+        "prompt_tokens": 17674,
+        "reusable_prefix_chars": 53464,
+        "reusable_prefix_tokens": 15275
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 62153,
+        "prompt_tokens": 17758,
+        "reusable_prefix_chars": 61859,
+        "reusable_prefix_tokens": 17674
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 72088,
+        "prompt_tokens": 20596,
+        "reusable_prefix_chars": 62151,
+        "reusable_prefix_tokens": 17757
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 72398,
+        "prompt_tokens": 20685,
+        "reusable_prefix_chars": 72086,
+        "reusable_prefix_tokens": 20596
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 81222,
+        "prompt_tokens": 23206,
+        "reusable_prefix_chars": 72396,
+        "reusable_prefix_tokens": 20684
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 81530,
+        "prompt_tokens": 23294,
+        "reusable_prefix_chars": 81220,
+        "reusable_prefix_tokens": 23205
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 87960,
+        "prompt_tokens": 25131,
+        "reusable_prefix_chars": 81528,
+        "reusable_prefix_tokens": 23293
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 88298,
+        "prompt_tokens": 25228,
+        "reusable_prefix_chars": 87958,
+        "reusable_prefix_tokens": 25130
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 88759,
+        "prompt_tokens": 25359,
+        "reusable_prefix_chars": 88296,
+        "reusable_prefix_tokens": 25227
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 89060,
+        "prompt_tokens": 25445,
+        "reusable_prefix_chars": 88757,
+        "reusable_prefix_tokens": 25359
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 95828,
+        "prompt_tokens": 27379,
+        "reusable_prefix_chars": 89058,
+        "reusable_prefix_tokens": 25445
+      }
+    ]
+  },
+  "forced_compaction": {
+    "turns": 12,
+    "model_requests": 24,
+    "prompt_tokens": 418076,
+    "reusable_prefix_tokens": 371380,
+    "reusable_prefix_fraction": 0.8883,
+    "duplicate_reads_avoided": 1,
+    "persisted_tool_results": 1,
+    "compactions": [
+      {
+        "turn": 6,
+        "before_tokens": 2223
+      }
+    ],
+    "compaction_recovery": [
+      {
+        "first_request_reusable_prefix_tokens": 3,
+        "next_request_reusable_prefix_tokens": 19390
+      }
+    ],
+    "ledger_file_entries": 6,
+    "usage_events": 24,
+    "errors": [],
+    "requests": [
+      {
+        "kind": "model",
+        "prompt_chars": 11562,
+        "prompt_tokens": 3303,
+        "reusable_prefix_chars": 0,
+        "reusable_prefix_tokens": 0
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 12230,
+        "prompt_tokens": 3494,
+        "reusable_prefix_chars": 11560,
+        "reusable_prefix_tokens": 3302
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 12521,
+        "prompt_tokens": 3577,
+        "reusable_prefix_chars": 12228,
+        "reusable_prefix_tokens": 3493
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 23175,
+        "prompt_tokens": 6621,
+        "reusable_prefix_chars": 12519,
+        "reusable_prefix_tokens": 3576
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 23488,
+        "prompt_tokens": 6710,
+        "reusable_prefix_chars": 23173,
+        "reusable_prefix_tokens": 6620
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 32142,
+        "prompt_tokens": 9183,
+        "reusable_prefix_chars": 23486,
+        "reusable_prefix_tokens": 6710
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 32459,
+        "prompt_tokens": 9274,
+        "reusable_prefix_chars": 32140,
+        "reusable_prefix_tokens": 9182
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 32908,
+        "prompt_tokens": 9402,
+        "reusable_prefix_chars": 32457,
+        "reusable_prefix_tokens": 9273
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 33202,
+        "prompt_tokens": 9486,
+        "reusable_prefix_chars": 32906,
+        "reusable_prefix_tokens": 9401
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 44343,
+        "prompt_tokens": 12669,
+        "reusable_prefix_chars": 33200,
+        "reusable_prefix_tokens": 9485
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 44639,
+        "prompt_tokens": 12754,
+        "reusable_prefix_chars": 44341,
+        "reusable_prefix_tokens": 12668
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 53158,
+        "prompt_tokens": 15188,
+        "reusable_prefix_chars": 44637,
+        "reusable_prefix_tokens": 12753
+      },
+      {
+        "kind": "summary",
+        "prompt_chars": 46640,
+        "prompt_tokens": 13325,
+        "reusable_prefix_chars": 11,
+        "reusable_prefix_tokens": 3
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 67870,
+        "prompt_tokens": 19391,
+        "reusable_prefix_chars": 11,
+        "reusable_prefix_tokens": 3
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 76265,
+        "prompt_tokens": 21790,
+        "reusable_prefix_chars": 67868,
+        "reusable_prefix_tokens": 19390
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 76557,
+        "prompt_tokens": 21873,
+        "reusable_prefix_chars": 76263,
+        "reusable_prefix_tokens": 21789
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 86492,
+        "prompt_tokens": 24712,
+        "reusable_prefix_chars": 76555,
+        "reusable_prefix_tokens": 21872
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 86802,
+        "prompt_tokens": 24800,
+        "reusable_prefix_chars": 86490,
+        "reusable_prefix_tokens": 24711
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 95626,
+        "prompt_tokens": 27321,
+        "reusable_prefix_chars": 86800,
+        "reusable_prefix_tokens": 24800
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 95934,
+        "prompt_tokens": 27409,
+        "reusable_prefix_chars": 95624,
+        "reusable_prefix_tokens": 27321
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 102364,
+        "prompt_tokens": 29246,
+        "reusable_prefix_chars": 95932,
+        "reusable_prefix_tokens": 27409
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 102702,
+        "prompt_tokens": 29343,
+        "reusable_prefix_chars": 102362,
+        "reusable_prefix_tokens": 29246
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 103163,
+        "prompt_tokens": 29475,
+        "reusable_prefix_chars": 102700,
+        "reusable_prefix_tokens": 29342
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 103464,
+        "prompt_tokens": 29561,
+        "reusable_prefix_chars": 103161,
+        "reusable_prefix_tokens": 29474
+      },
+      {
+        "kind": "model",
+        "prompt_chars": 110232,
+        "prompt_tokens": 31494,
+        "reusable_prefix_chars": 103462,
+        "reusable_prefix_tokens": 29560
+      }
+    ]
+  }
+}

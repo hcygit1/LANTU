@@ -1,0 +1,24 @@
+Lantu offline cache validation
+mode: standard | RepoMap: disabled
+
+[main]
+turns: 12
+model requests: 24
+estimated prompt tokens: 368692
+predicted reusable prefix tokens: 341295 (92.6%)
+duplicate reads avoided: 2
+persisted tool results: 1
+compactions: 0
+compaction prefix recovery: []
+errors: 0
+
+[forced_compaction]
+turns: 12
+model requests: 24
+estimated prompt tokens: 418076
+predicted reusable prefix tokens: 371380 (88.8%)
+duplicate reads avoided: 1
+persisted tool results: 1
+compactions: 1
+compaction prefix recovery: [{'first_request_reusable_prefix_tokens': 3, 'next_request_reusable_prefix_tokens': 19390}]
+errors: 0
