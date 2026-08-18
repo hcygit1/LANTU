@@ -39,7 +39,8 @@ from lantu.client import create_client, resolve_context_window
 from lantu.commands import CommandContext, CommandRegistry, CommandType
 from lantu.commands.handlers import register_all_commands
 from lantu.commands.parser import parse_command
-from lantu.config import MCPServerConfig, ProviderConfig
+from lantu.config import MCPServerConfig, ProviderConfig, RepoMapConfig
+from lantu.context.repo_map import build_repo_map
 from lantu.conversation import ConversationManager
 from lantu.hooks import HookEngine
 from lantu.mcp import MCPManager
@@ -71,12 +72,18 @@ class RemoteServer:
         hook_engine: HookEngine | None = None,
         addr: str = "0.0.0.0",
         port: int = 18888,
+        show_thinking: bool = False,
+        tool_loading_mode: str = "standard",
+        repo_map_config: RepoMapConfig | None = None,
     ) -> None:
         self.providers = providers
         self._mcp_server_configs = mcp_servers or []
         self.hook_engine = hook_engine
         self.addr = addr
         self.port = port
+        self.show_thinking = show_thinking
+        self.tool_loading_mode = tool_loading_mode
+        self.repo_map_config = repo_map_config or RepoMapConfig()
 
         # WebSocket 连接池（支持多客户端广播）
         self._connections: set[ServerConnection] = set()
@@ -171,6 +178,14 @@ class RemoteServer:
                     "cwd": os.getcwd(),
                 },
             })
+            if self.agent is not None:
+                get_notice = getattr(self.agent, "tool_loading_notice", None)
+                notice = get_notice() if callable(get_notice) else None
+                if notice:
+                    await self._broadcast({
+                        "type": "system",
+                        "data": {"message": notice},
+                    })
 
             # 推送命令列表
             await self._broadcast({
@@ -244,7 +259,9 @@ class RemoteServer:
         client = create_client(provider)
 
         # 工具注册表
-        self.registry = create_default_registry()
+        self.registry = create_default_registry(
+            loading_mode=self.tool_loading_mode
+        )
         self.registry.register(ToolSearchTool(self.registry, protocol=provider.protocol))
 
         # Skill 加载
@@ -254,6 +271,13 @@ class RemoteServer:
         self.registry.register(load_skill_tool)
 
         # 创建 Agent
+        repo_map = None
+        if self.repo_map_config.enabled:
+            repo_map = build_repo_map(
+                work_dir,
+                max_tokens=self.repo_map_config.max_tokens,
+            )
+
         self.agent = Agent(
             client=client,
             registry=self.registry,
@@ -265,6 +289,7 @@ class RemoteServer:
             memory_manager=self.memory_manager,
             hook_engine=self.hook_engine,
             session=self.session,
+            repo_map=repo_map,
         )
         self.agent.session_id = self.session_id
 
@@ -345,16 +370,21 @@ class RemoteServer:
         assert self.agent is not None
         assert self.session is not None
 
+        lock_mode = getattr(self.agent, "lock_tool_loading_mode", None)
+        if callable(lock_mode):
+            lock_mode()
         self.session.start_turn("user")
         turn_open = True
         interruption_reason = "agent_error"
         self.conversation.add_user_message(content)
         self.session.commit_message(self.conversation.history[-1])
 
-        # 首次注入 MCP 指令
+        # 每轮经过 ConversationManager 去重；压缩删除后可在下一轮重新注入。
         if self._mcp_instructions:
-            self.conversation.add_system_reminder(self._mcp_instructions)
-            self._mcp_instructions = ""
+            self.conversation.add_system_reminder(
+                self._mcp_instructions,
+                reminder_key="mcp_instructions",
+            )
 
         # 创建取消事件
         self._cancel_event = asyncio.Event()
@@ -376,10 +406,11 @@ class RemoteServer:
                     })
 
                 elif isinstance(event, ThinkingText):
-                    await self._broadcast({
-                        "type": "thinking_text",
-                        "data": {"text": event.text},
-                    })
+                    if self.show_thinking:
+                        await self._broadcast({
+                            "type": "thinking_text",
+                            "data": {"text": event.text},
+                        })
 
                 elif isinstance(event, ToolUseEvent):
                     await self._broadcast({

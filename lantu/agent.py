@@ -19,11 +19,13 @@ from lantu.context import (
     RecoveryState,
     auto_compact,
     ensure_session_dir,
-    prepare_tool_results,
+    prepare_tool_results_with_metadata,
 )
 from lantu.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
 from lantu.conversation import ThinkingBlock as ConvThinkingBlock
+from lantu.context.repo_map import RepoMap, RepoMapSnapshot
 from lantu.memory.auto_memory import MemoryManager
+from lantu.memory.file_ledger import FileLedger
 from lantu.permissions import (
     Decision,
     PermissionChecker,
@@ -50,6 +52,7 @@ log = logging.getLogger(__name__)
 MEMORY_EXTRACTION_INTERVAL = 5
 MAX_TOKENS_CEILING = 64000
 MAX_OUTPUT_TOKENS_RECOVERIES = 3
+TOOL_SCHEMA_NOTICE_THRESHOLD = 20_000
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +233,7 @@ def partition_tool_calls(
     batches: list[ToolBatch] = []
     for tc in tool_calls:
         tool = registry.get(tc.tool_name)
-        safe = tool is not None and tool.is_concurrency_safe and registry.is_enabled(tc.tool_name)
+        safe = tool is not None and tool.is_concurrency_safe and registry.is_model_visible(tc.tool_name)
 
         if safe and batches and batches[-1].concurrent:
             batches[-1].calls.append(tc)
@@ -303,6 +306,7 @@ class Agent:
         memory_manager: MemoryManager | None = None,
         hook_engine: HookEngine | None = None,
         session: Any | None = None,
+        repo_map: RepoMap | None = None,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -326,6 +330,14 @@ class Agent:
         self.memory_manager = memory_manager
         self.hook_engine = hook_engine
         self.session = session
+        self.repo_map = repo_map
+        self.file_ledger = getattr(session, "file_ledger", None) or FileLedger()
+        session_epoch = getattr(session, "schema_epoch", None)
+        self._schema_epoch_id = (
+            session_epoch.get("epoch_id")
+            if isinstance(session_epoch, dict)
+            else None
+        )
         self._loop_count = 0
         # 记忆提取合并策略（对齐 Go 版 inProgress + pendingContext）：
         # _extracting: 标记是否有提取正在进行
@@ -346,6 +358,8 @@ class Agent:
         self.notification_fn: Callable[[], list[str]] | None = None
         self.file_history: Any = None
         self._stable_system_prompt: str | None = None
+        self.tool_loading_mode_locked = False
+        self._tool_schema_notice_shown = False
 
         # 非阻塞 memory recall：prefetch task 与主 LLM 调用并行，工具执行后注入
         self.memory_recall_task: Any | None = None
@@ -386,6 +400,35 @@ class Agent:
         if self.permission_checker:
             self.permission_checker.mode = mode
 
+    def set_tool_loading_mode(self, mode: str) -> None:
+        if self.tool_loading_mode_locked:
+            raise RuntimeError(
+                "tool loading mode is locked after the first user message"
+            )
+        self.registry.set_loading_mode(mode)
+        self._tool_schema_notice_shown = False
+
+    def lock_tool_loading_mode(self) -> None:
+        self.tool_loading_mode_locked = True
+
+    def unlock_tool_loading_mode(self) -> None:
+        self.tool_loading_mode_locked = False
+
+    def tool_loading_notice(self) -> str | None:
+        """Return a one-time user-facing hint for a large standard tool list."""
+        if self._tool_schema_notice_shown:
+            return None
+        if self.registry.loading_mode != "standard":
+            return None
+        self._tool_schema_notice_shown = True
+        size = self.registry.schema_size(self.protocol)
+        if size <= TOOL_SCHEMA_NOTICE_THRESHOLD:
+            return None
+        return (
+            f"当前工具定义较多（约 {size:,} 字符），可能占用较多上下文。\n"
+            "如需按需加载工具，请在发送消息前使用：/tools mode progressive"
+        )
+
     def activate_skill(self, name: str, prompt_body: str) -> None:
         self.active_skills[name] = prompt_body
 
@@ -407,13 +450,34 @@ class Agent:
                 coordinator_mode=self.coordinator_mode,
                 agent_catalog=self._agent_catalog_list or None,
             )
+            if self.repo_map is not None:
+                repo_map_section = self.repo_map.prompt_section()
+                if repo_map_section:
+                    self._stable_system_prompt += f"\n\n{repo_map_section}"
         return self._stable_system_prompt
+
+    def refresh_repo_map(self) -> RepoMapSnapshot:
+        if self.repo_map is None:
+            raise RuntimeError("RepoMap is disabled in context.repo_map.enabled")
+        snapshot = self.repo_map.refresh()
+        self._stable_system_prompt = None
+        return snapshot
+
+    def retarget_repo_map(self, work_dir: str) -> RepoMapSnapshot | None:
+        if self.repo_map is None:
+            return None
+        snapshot = self.repo_map.retarget(work_dir)
+        self._stable_system_prompt = None
+        return snapshot
 
     def _append_hook_prompts(self, conversation: ConversationManager) -> None:
         if not self.hook_engine:
             return
         for prompt in self.hook_engine.drain_prompt_messages():
-            conversation.add_system_reminder(f"Hook injected context:\n{prompt}")
+            conversation.add_system_reminder(
+                f"Hook injected context:\n{prompt.content}",
+                reminder_key=f"hook:{prompt.hook_id}:{prompt.event}",
+            )
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
         return HookContext(
@@ -501,7 +565,10 @@ class Agent:
                 plan_reminder = build_plan_mode_reminder(
                     plan_path, plan_exists, iteration
                 )
-                conversation.add_system_reminder(plan_reminder)
+                conversation.add_system_reminder(
+                    plan_reminder,
+                    reminder_key="plan_mode",
+                )
 
             if self.hook_engine:
                 for note in self.hook_engine.drain_notifications():
@@ -515,7 +582,8 @@ class Agent:
                     "The following deferred tools are available via ToolSearch. "
                     "Their schemas are NOT loaded - use ToolSearch with "
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
-                    + "\n".join(deferred_names)
+                    + "\n".join(deferred_names),
+                    reminder_key="deferred_tools",
                 )
 
             tools = self.registry.get_all_schemas(self.protocol)
@@ -538,6 +606,7 @@ class Agent:
                     message=f"上下文已压缩（压缩前 {compact_result.before_tokens:,} tokens）",
                     boundary=compact_result.boundary,
                 )
+                self.file_ledger.clear_visible()
                 conversation.inject_environment(env_context)
                 mem = self.memory_manager.load() if self.memory_manager else ""
                 conversation.inject_long_term_memory(
@@ -547,6 +616,7 @@ class Agent:
                 yield ErrorEvent(message=compact_result)
 
             collector = StreamCollector()
+            self._sync_schema_epoch()
             model_call_id = uuid.uuid4().hex
             model_started = time.monotonic()
             self._record_model_event(
@@ -794,9 +864,8 @@ class Agent:
             exit_plan_called = any(
                 tc.tool_name == "ExitPlanMode" for tc in response.tool_calls
             )
-            conversation.add_tool_results_message(
-                prepare_tool_results(tool_results, self.session_dir)
-            )
+            prepared = self._prepare_tool_results(tool_results)
+            conversation.add_tool_results_message(prepared)
 
             # 非阻塞 memory recall：工具执行完后检查 prefetch 是否就绪
             if self.memory_recall_task and not self._memory_recall_consumed:
@@ -878,9 +947,28 @@ class Agent:
             self._record_tool_finished(tc, result.result, result.elapsed)
             return result
 
+        if not self.registry.is_model_visible(tc.tool_name):
+            result = _ToolExecResult(
+                tool_id=tc.tool_id,
+                tool_name=tc.tool_name,
+                result=ToolResult(
+                    output=(
+                        f"Error: tool '{tc.tool_name}' is not loaded. "
+                        "Use ToolSearch before calling it."
+                    ),
+                    is_error=True,
+                ),
+                elapsed=time.monotonic() - start,
+                is_unknown=False,
+            )
+            self._record_tool_finished(tc, result.result, result.elapsed)
+            return result
+
         try:
             params = tool.params_model.model_validate(tc.arguments)
             result = await tool.execute(params)
+            self._record_loaded_tool_schemas(tc, result)
+            self._record_file_ledger_event(tc, result)
         except ValidationError as e:
             result = ToolResult(output=f"Parameter validation error: {e}", is_error=True)
         except Exception as e:
@@ -926,6 +1014,19 @@ class Agent:
         if not self.registry.is_enabled(tc.tool_name):
             result = ToolResult(
                 output=f"Error: tool '{tc.tool_name}' is disabled in current mode",
+                is_error=True,
+            )
+            elapsed = time.monotonic() - start
+            self._record_tool_finished(tc, result, elapsed)
+            yield result, elapsed, is_unknown
+            return
+
+        if not self.registry.is_model_visible(tc.tool_name):
+            result = ToolResult(
+                output=(
+                    f"Error: tool '{tc.tool_name}' is not loaded. "
+                    "Use ToolSearch before calling it."
+                ),
                 is_error=True,
             )
             elapsed = time.monotonic() - start
@@ -986,6 +1087,8 @@ class Agent:
         try:
             params = tool.params_model.model_validate(tc.arguments)
             result = await tool.execute(params)
+            self._record_loaded_tool_schemas(tc, result)
+            self._record_file_ledger_event(tc, result)
         except ValidationError as e:
             result = ToolResult(
                 output=f"Parameter validation error: {e}", is_error=True
@@ -1008,12 +1111,70 @@ class Agent:
             return
         from lantu.memory.session import ExecutionEvent
 
+        event_payload = {"model_call_id": model_call_id, **payload}
+        if self._schema_epoch_id is not None:
+            event_payload.setdefault("schema_epoch_id", self._schema_epoch_id)
         self.session.record(
             ExecutionEvent(
                 event_type,
-                {"model_call_id": model_call_id, **payload},
+                event_payload,
             )
         )
+
+    def _sync_schema_epoch(self) -> None:
+        """Record a new tool-schema view before the next provider request."""
+        epoch = self.registry.schema_epoch(self.protocol)
+        if epoch.epoch_id == self._schema_epoch_id:
+            return
+
+        previous = getattr(self.session, "schema_epoch", None)
+        previous_id = previous.get("epoch_id") if isinstance(previous, dict) else None
+        payload = epoch.to_payload()
+        payload["previous_epoch_id"] = previous_id
+        if previous_id is None:
+            reason = "initial"
+        elif previous.get("loading_mode") != epoch.loading_mode:
+            reason = "mode_changed"
+        elif set(epoch.visible_tools) > set(previous.get("visible_tools", [])):
+            reason = "tool_loaded"
+        else:
+            reason = "schema_changed"
+        payload["reason"] = reason
+
+        if self.session is not None:
+            from lantu.memory.session import ExecutionEvent
+
+            self.session.record(
+                ExecutionEvent("tool.schema.epoch.changed", payload)
+            )
+        self._schema_epoch_id = epoch.epoch_id
+
+    def _record_loaded_tool_schemas(
+        self, tc: ToolCallComplete, result: ToolResult
+    ) -> None:
+        """Persist a successful ToolSearch activation before the next request."""
+        if tc.tool_name != "ToolSearch" or not result.meta or self.session is None:
+            return
+        states = result.meta.get("loaded_tools")
+        if not isinstance(states, list) or not states:
+            return
+        try:
+            from lantu.memory.session import ExecutionEvent
+
+            self.session.record(
+                ExecutionEvent(
+                    "tool.schema.loaded",
+                    {"tools": states},
+                )
+            )
+        except Exception:
+            names = [
+                state["name"]
+                for state in states
+                if isinstance(state, dict) and isinstance(state.get("name"), str)
+            ]
+            self.registry.forget_discovered(names)
+            raise
 
     def _record_usage(self, response: LLMResponse) -> UsageEvent:
         self.total_input_tokens += response.input_tokens
@@ -1121,6 +1282,116 @@ class Agent:
             return
         self.recovery_state.record_file_read(path, content)
 
+    def _prepare_tool_results(
+        self, results: list[ToolResultBlock]
+    ) -> list[ToolResultBlock]:
+        """Deduplicate visible file ranges, then record what reached history."""
+        deduplicated: list[ToolResultBlock] = []
+        for result in results:
+            observation = self.file_ledger.observation(result.tool_use_id)
+            if (
+                observation is not None
+                and self.file_ledger.is_visible(
+                    observation.path,
+                    observation.content_hash,
+                    observation.range_start,
+                    observation.range_end,
+                )
+            ):
+                deduplicated.append(
+                    ToolResultBlock(
+                        tool_use_id=result.tool_use_id,
+                        content=(
+                            "The requested lines of this file version are already "
+                            "visible in the conversation; the content is unchanged."
+                        ),
+                        is_error=result.is_error,
+                    )
+                )
+            else:
+                deduplicated.append(result)
+
+        prepared = prepare_tool_results_with_metadata(
+            deduplicated, self.session_dir
+        )
+        for result in deduplicated:
+            observation = self.file_ledger.observation(result.tool_use_id)
+            if observation is None:
+                continue
+            presentation = prepared.presentations.get(result.tool_use_id)
+            if presentation is None:
+                continue
+            if presentation.mode == "inline":
+                self.file_ledger.mark_visible(
+                    observation.path,
+                    observation.content_hash,
+                    observation.range_start,
+                    observation.range_end,
+                )
+            elif presentation.preview_line_count > 0:
+                self.file_ledger.mark_visible(
+                    observation.path,
+                    observation.content_hash,
+                    observation.range_start,
+                    observation.range_start + presentation.preview_line_count - 1,
+                )
+        return prepared.results
+
+    def _record_file_ledger_event(
+        self, tc: ToolCallComplete, result: ToolResult
+    ) -> None:
+        """Persist the latest file version after a successful file operation."""
+        if result.is_error or self.session is None:
+            return
+        if tc.tool_name not in {"ReadFile", "EditFile", "WriteFile"}:
+            return
+        ledger = self.file_ledger
+        raw_path = tc.arguments.get("file_path")
+        if not isinstance(raw_path, str) or not raw_path:
+            return
+        tool = self.registry.get(tc.tool_name)
+        if tool is None:
+            return
+        path = tool.resolve_path(raw_path)
+        try:
+            content = path.read_text(encoding="utf-8")
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError:
+            return
+
+        arguments = tc.arguments
+        operation = {
+            "ReadFile": "read",
+            "EditFile": "edit",
+            "WriteFile": "write",
+        }[tc.tool_name]
+        offset = arguments.get("offset", 0) if tc.tool_name == "ReadFile" else 0
+        limit = arguments.get("limit") if tc.tool_name == "ReadFile" else None
+        try:
+            offset_value = int(offset)
+            limit_value = None if limit is None else int(limit)
+        except (TypeError, ValueError):
+            offset_value = 0
+            limit_value = None
+
+        from lantu.memory.session import ExecutionEvent
+
+        if operation != "read":
+            ledger.invalidate(path)
+
+        entry = FileLedger.build_entry(
+            path,
+            content,
+            operation=operation,
+            offset=offset_value,
+            limit=limit_value,
+            mtime_ns=mtime_ns,
+            tool_call_id=tc.tool_id,
+        )
+        event_type = "file.observed" if operation == "read" else "file.updated"
+        self.session.record(ExecutionEvent(event_type, entry.to_payload()))
+        ledger.apply(entry)
+
     async def _extract_memories(
         self, conversation: ConversationManager
     ) -> None:
@@ -1173,6 +1444,7 @@ class Agent:
             transcript_path=self._transcript_path,
         )
         if isinstance(result, CompactEvent):
+            self.file_ledger.clear_visible()
             env_context = build_environment_context(
             self.work_dir, self.active_skills, self._skill_catalog, self._agent_catalog
         )

@@ -32,7 +32,7 @@ class Glob(Tool):
             ]
             # 按修改时间倒序，最近修改的排前面
             found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            matches = [str(p.relative_to(base)) for p in found]
+            matches = [p.relative_to(base).as_posix() for p in found]
         except Exception as e:
             return ToolResult(output=f"Error: {e}", is_error=True)
 

@@ -29,6 +29,7 @@ async def handle_status(ctx: CommandContext) -> None:
         enabled = [t for t in ctx.agent.registry.list_tools()
                    if ctx.agent.registry.is_enabled(t.name)]
         lines.append(f"工具: {len(enabled)} 个已启用")
+        lines.append(f"工具加载: {ctx.agent.registry.loading_mode}")
 
 
     if ctx.memory_manager:

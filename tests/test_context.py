@@ -231,6 +231,28 @@ class TestSessionDir:
         assert session_dir.exists()
         assert len(list(session_dir.iterdir())) == 0
 
+    def test_cleanup_keeps_artifacts_referenced_by_rebuilt_messages(
+        self, tmp_path: Path
+    ) -> None:
+        session_dir = ensure_session_dir(str(tmp_path))
+        kept_path = persist_tool_result("kept", "kept output", session_dir)
+        old_path = persist_tool_result("old", "old output", session_dir)
+        kept_message = Message(
+            role="user",
+            content=make_persisted_preview("kept output", kept_path),
+            tool_results=[
+                ToolResultBlock(
+                    tool_use_id="kept",
+                    content=make_persisted_preview("kept output", kept_path),
+                )
+            ],
+        )
+
+        cleanup_tool_results(session_dir, keep_messages=[kept_message])
+
+        assert kept_path.exists()
+        assert not old_path.exists()
+
 
 # ---------------------------------------------------------------------------
 # 真实用量锚点 + 增量估算（current_tokens）
@@ -305,6 +327,59 @@ class TestUsageAnchor:
         assert conv.last_input_tokens == 0
         # 此时回退到按字符估算已被摘要后的历史。
         assert conv.current_tokens() == estimate_tokens(conv.history)
+
+
+class TestReminderDeduplication:
+    def test_same_key_and_content_is_added_once(self) -> None:
+        conv = ConversationManager()
+
+        assert conv.add_system_reminder("tools: A", reminder_key="deferred_tools")
+        assert not conv.add_system_reminder(
+            "tools: A",
+            reminder_key="deferred_tools",
+        )
+
+        assert len(conv.history) == 1
+        assert conv.history[0].reminder_key == "deferred_tools"
+        assert conv.history[0].reminder_hash
+
+    def test_changed_content_appends_new_version(self) -> None:
+        conv = ConversationManager()
+
+        conv.add_system_reminder("tools: A", reminder_key="deferred_tools")
+        assert conv.add_system_reminder(
+            "tools: A, B",
+            reminder_key="deferred_tools",
+        )
+
+        assert len(conv.history) == 2
+        assert conv.history[0].reminder_hash != conv.history[1].reminder_hash
+
+    def test_unkeyed_dynamic_reminders_are_never_deduplicated(self) -> None:
+        conv = ConversationManager()
+
+        conv.add_system_reminder("worker completed")
+        conv.add_system_reminder("worker completed")
+
+        assert len(conv.history) == 2
+        assert all(message.reminder_key is None for message in conv.history)
+
+    def test_replace_history_rebuilds_versions_from_kept_messages(self) -> None:
+        conv = ConversationManager()
+        conv.add_system_reminder("tools: A", reminder_key="deferred_tools")
+        kept = conv.history[-1]
+
+        conv.replace_history([kept])
+        assert not conv.add_system_reminder(
+            "tools: A",
+            reminder_key="deferred_tools",
+        )
+
+        conv.replace_history([])
+        assert conv.add_system_reminder(
+            "tools: A",
+            reminder_key="deferred_tools",
+        )
 
 
 class TestEstimateTokens:

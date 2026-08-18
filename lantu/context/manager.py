@@ -74,6 +74,22 @@ class CompactEvent:
     boundary: CompactBoundary | None = None
 
 
+@dataclass(frozen=True)
+class ToolResultPresentation:
+    """How much of one tool result was actually placed in the conversation."""
+
+    tool_use_id: str
+    mode: str  # ``inline`` or ``artifact``
+    artifact_path: str | None = None
+    preview_line_count: int = 0
+
+
+@dataclass
+class PreparedToolResults:
+    results: list[ToolResultBlock]
+    presentations: dict[str, ToolResultPresentation]
+
+
 # ---------------------------------------------------------------------------
 # Session 目录管理
 # ---------------------------------------------------------------------------
@@ -84,10 +100,38 @@ def ensure_session_dir(work_dir: str) -> Path:
     return session_dir
 
 
-def cleanup_tool_results(session_dir: Path) -> None:
-    if session_dir.exists():
+def cleanup_tool_results(
+    session_dir: Path,
+    keep_messages: list[Message] | None = None,
+) -> None:
+    """Delete unreferenced tool-result artifacts.
+
+    With no messages this keeps the old "clear everything" behavior used by
+    callers that explicitly reset a result directory. Compaction passes the
+    rebuilt messages so paths still visible to the model survive.
+    """
+    if not session_dir.exists():
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return
+    if keep_messages is None:
         shutil.rmtree(session_dir)
         session_dir.mkdir(parents=True, exist_ok=True)
+        return
+
+    referenced_text = "\n".join(
+        [message.content for message in keep_messages]
+        + [
+            result.content
+            for message in keep_messages
+            for result in message.tool_results
+        ]
+    )
+    for artifact in session_dir.glob("*.txt"):
+        if str(artifact) not in referenced_text:
+            try:
+                artifact.unlink()
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -119,20 +163,40 @@ def make_persisted_preview(content: str, file_path: Path) -> str:
     )
 
 
-def prepare_tool_results(
+def _preview_line_count(content: str) -> int:
+    """Count only complete lines in the displayed preview."""
+    if len(content) <= PREVIEW_CHARS:
+        return len(content.splitlines())
+    preview = content[:PREVIEW_CHARS]
+    complete = preview.rsplit("\n", 1)[0] if "\n" in preview else ""
+    return len(complete.splitlines())
+
+
+def prepare_tool_results_with_metadata(
     results: list[ToolResultBlock],
     session_dir: Path,
-) -> list[ToolResultBlock]:
+) -> PreparedToolResults:
     """Finalize one turn's tool results before adding them to conversation history."""
     prepared: list[ToolResultBlock] = []
+    presentations: dict[str, ToolResultPresentation] = {}
     for result in results:
         content = result.content
+        presentations[result.tool_use_id] = ToolResultPresentation(
+            tool_use_id=result.tool_use_id,
+            mode="inline",
+        )
         if (
             not content.startswith(PERSISTED_TAG)
             and len(content) > SINGLE_RESULT_CHAR_LIMIT
         ):
             path = persist_tool_result(result.tool_use_id, content, session_dir)
             content = make_persisted_preview(content, path)
+            presentations[result.tool_use_id] = ToolResultPresentation(
+                tool_use_id=result.tool_use_id,
+                mode="artifact",
+                artifact_path=str(path),
+                preview_line_count=_preview_line_count(result.content),
+            )
         prepared.append(
             ToolResultBlock(
                 tool_use_id=result.tool_use_id,
@@ -161,9 +225,23 @@ def prepare_tool_results(
             content=preview,
             is_error=result.is_error,
         )
+        presentations[result.tool_use_id] = ToolResultPresentation(
+            tool_use_id=result.tool_use_id,
+            mode="artifact",
+            artifact_path=str(path),
+            preview_line_count=_preview_line_count(result.content),
+        )
         total += len(preview) - len(result.content)
 
-    return prepared
+    return PreparedToolResults(prepared, presentations)
+
+
+def prepare_tool_results(
+    results: list[ToolResultBlock],
+    session_dir: Path,
+) -> list[ToolResultBlock]:
+    """Backward-compatible wrapper returning only conversation blocks."""
+    return prepare_tool_results_with_metadata(results, session_dir).results
 
 
 # ---------------------------------------------------------------------------
@@ -746,7 +824,7 @@ async def auto_compact(
     # 不清零会导致 current_tokens() 对增量的估算出错。
     # 下一次 API 响应会基于重建后的 history 重新锚定。
     conversation.replace_history(new_messages)
-    cleanup_tool_results(session_dir)
+    cleanup_tool_results(session_dir, keep_messages=new_messages)
 
     if breaker is not None:
         breaker.record_success()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -32,6 +33,8 @@ class Message:
     tool_uses: list[ToolUseBlock] = field(default_factory=list)
     tool_results: list[ToolResultBlock] = field(default_factory=list)
     thinking_blocks: list[ThinkingBlock] = field(default_factory=list)
+    reminder_key: str | None = None
+    reminder_hash: str | None = None
 
 
 # 估算最后一次 API 用量锚点之后追加的消息 token 开销时使用的字符/token 比率。
@@ -75,6 +78,20 @@ class ConversationManager:
     # baseline_tokens == 0 表示"尚无锚点"（冷启动），此时退化为纯字符估算。
     baseline_tokens: int = field(default=0, init=False)
     anchor_count: int = field(default=0, init=False)
+    _reminder_versions: dict[str, str] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        self._rebuild_reminder_versions()
+
+    def _rebuild_reminder_versions(self) -> None:
+        self._reminder_versions.clear()
+        for message in self.history:
+            if message.reminder_key and message.reminder_hash:
+                self._reminder_versions[message.reminder_key] = message.reminder_hash
 
     def record_usage_anchor(
         self,
@@ -128,13 +145,34 @@ class ConversationManager:
             )
         )
 
-    def add_system_reminder(self, content: str) -> None:
+    def add_system_reminder(
+        self,
+        content: str,
+        *,
+        reminder_key: str | None = None,
+    ) -> bool:
+        reminder_hash = (
+            hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if reminder_key is not None
+            else None
+        )
+        if (
+            reminder_key is not None
+            and self._reminder_versions.get(reminder_key) == reminder_hash
+        ):
+            return False
+
         self.history.append(
             Message(
                 role="user",
                 content=f"<system-reminder>\n{content}\n</system-reminder>",
+                reminder_key=reminder_key,
+                reminder_hash=reminder_hash,
             )
         )
+        if reminder_key is not None and reminder_hash is not None:
+            self._reminder_versions[reminder_key] = reminder_hash
+        return True
 
     def add_tool_results_message(self, tool_results: list[ToolResultBlock]) -> None:
         self.history.append(
@@ -183,6 +221,7 @@ class ConversationManager:
 
     def replace_history(self, new_messages: list[Message]) -> None:
         self.history = new_messages
+        self._rebuild_reminder_versions()
         self.env_injected = False
         self.ltm_injected = False
         # 旧的用量锚点描述的是压缩前的对话记录，这里清除它，

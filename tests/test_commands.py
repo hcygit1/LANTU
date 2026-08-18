@@ -73,6 +73,79 @@ def _make_context(args: str = "", ui: MockUI | None = None) -> CommandContext:
 
 
 @pytest.mark.asyncio
+async def test_tools_command_changes_mode_before_first_message() -> None:
+    from lantu.commands.handlers.tools import handle_tools
+    from lantu.tools import ToolRegistry
+
+    ui = MockUI()
+    agent = SimpleNamespace(
+        registry=ToolRegistry(loading_mode="standard"),
+        tool_loading_mode_locked=False,
+        set_tool_loading_mode=lambda mode: agent.registry.set_loading_mode(mode),
+    )
+    ctx = _make_context(args="mode progressive", ui=ui)
+    ctx.agent = agent
+
+    await handle_tools(ctx)
+
+    assert agent.registry.loading_mode == "progressive"
+    assert "已切换" in ui.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_tools_command_rejects_change_after_first_message() -> None:
+    from lantu.commands.handlers.tools import handle_tools
+    from lantu.tools import ToolRegistry
+
+    ui = MockUI()
+    agent = SimpleNamespace(
+        registry=ToolRegistry(loading_mode="standard"),
+        tool_loading_mode_locked=True,
+        set_tool_loading_mode=MagicMock(),
+    )
+    ctx = _make_context(args="mode progressive", ui=ui)
+    ctx.agent = agent
+
+    await handle_tools(ctx)
+
+    agent.set_tool_loading_mode.assert_not_called()
+    assert "不能切换" in ui.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_repo_map_command_reports_disabled() -> None:
+    from lantu.commands.handlers.repo_map import handle_repo_map
+
+    ui = MockUI()
+    ctx = _make_context(ui=ui)
+    ctx.agent = SimpleNamespace(repo_map=None)
+
+    await handle_repo_map(ctx)
+
+    assert "未启用" in ui.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_repo_map_command_refreshes_enabled_map() -> None:
+    from lantu.commands.handlers.repo_map import handle_repo_map
+    from lantu.context.repo_map import RepoMapSnapshot
+
+    ui = MockUI()
+    snapshot = RepoMapSnapshot("map", 2, 3, 4, False)
+    agent = SimpleNamespace(
+        repo_map=SimpleNamespace(snapshot=snapshot),
+        refresh_repo_map=MagicMock(return_value=snapshot),
+    )
+    ctx = _make_context(args="refresh", ui=ui)
+    ctx.agent = agent
+
+    await handle_repo_map(ctx)
+
+    agent.refresh_repo_map.assert_called_once_with()
+    assert "已刷新" in ui.messages[0]
+
+
+@pytest.mark.asyncio
 async def test_mcp_command_reads_inline_runtime_connection_state() -> None:
     from lantu.commands.handlers.mcp import handle_mcp
 
@@ -380,76 +453,6 @@ class TestExitHandler:
         assert ui.messages == ["当前前端不支持 /exit"]
 
 
-class TestLegacyTUIExit:
-    @staticmethod
-    def _make_streaming_app() -> Any:
-        from lantu.app import LantuApp
-
-        app = LantuApp([])
-        app._streaming = True
-
-        async def generate_forever() -> None:
-            await asyncio.Event().wait()
-
-        app._agent_task = asyncio.create_task(generate_forever())
-        app._show_system_message = MagicMock()
-        app._finish_streaming = MagicMock()
-
-        app.agent = MagicMock()
-        app.agent.memory_manager = object()
-        app.agent._extract_memories = AsyncMock()
-        app.client = MagicMock()
-        app.client.aclose = AsyncMock()
-        app.hook_engine = MagicMock()
-        app.hook_engine.run_hooks = AsyncMock()
-        app._shutdown_mcp = AsyncMock()
-        app._stale_cleanup_task = MagicMock()
-        app._stale_cleanup_task.done.return_value = False
-
-        member = MagicMock()
-        member.name = "worker"
-        team = MagicMock()
-        team.members = [member]
-        app.team_manager = MagicMock()
-        app.team_manager._teams = {"team": team}
-        app.session = MagicMock()
-        app.exit = MagicMock()
-        return app
-
-    @pytest.mark.asyncio
-    async def test_command_context_exit_cleans_up_while_streaming(self) -> None:
-        app = self._make_streaming_app()
-
-        request_exit = app._build_command_context("").config["request_exit"]
-        await request_exit()
-
-        assert app._agent_task.cancelled()
-        app.agent._extract_memories.assert_awaited_once_with(app.conversation)
-        app.client.aclose.assert_awaited_once_with()
-        app.hook_engine.run_hooks.assert_awaited_once()
-        app._shutdown_mcp.assert_awaited_once_with()
-        app._stale_cleanup_task.cancel.assert_called_once_with()
-        team = app.team_manager._teams["team"]
-        team.set_member_active.assert_called_once_with("worker", False)
-        app.team_manager.delete_team.assert_called_once_with("team")
-        app.session.close.assert_called_once_with()
-        app.exit.assert_called_once_with()
-
-    @pytest.mark.asyncio
-    async def test_command_context_exit_does_not_repeat_cleanup(self) -> None:
-        app = self._make_streaming_app()
-        request_exit = app._build_command_context("").config["request_exit"]
-
-        await request_exit()
-        await request_exit()
-
-        app.agent._extract_memories.assert_awaited_once_with(app.conversation)
-        app.client.aclose.assert_awaited_once_with()
-        app.hook_engine.run_hooks.assert_awaited_once()
-        app._shutdown_mcp.assert_awaited_once_with()
-        app._stale_cleanup_task.cancel.assert_called_once_with()
-        app.session.close.assert_called_once_with()
-
 class TestSkillHandler:
     @pytest.mark.asyncio
     async def test_skill_list_no_loader(self) -> None:
@@ -594,6 +597,7 @@ class TestRegisterAllCommands:
             "help", "compact", "clear", "plan",
             "session", "mcp", "memory", "permission",
             "sandbox", "rewind", "status", "skill", "exit",
+            "tools", "repo-map",
         }
         assert names == expected
 

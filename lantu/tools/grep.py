@@ -48,7 +48,7 @@ class Grep(Tool):
                 continue
             for line_num, line in enumerate(text.splitlines(), 1):
                 if regex.search(line):
-                    rel = file_path.relative_to(base)
+                    rel = file_path.relative_to(base).as_posix()
                     results.append(f"{rel}:{line_num}:{line}")
 
         if not results:

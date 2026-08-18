@@ -51,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Permission mode (overrides config.yaml)",
     )
     parser.add_argument(
+        "--tool-loading-mode",
+        choices=["standard", "progressive"],
+        default=None,
+        help="Tool Schema loading mode (overrides config.yaml)",
+    )
+    parser.add_argument(
         "-p",
         metavar="PROMPT",
         default=None,
@@ -67,11 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Start in remote mode: WebSocket server on 0.0.0.0:18888 with browser UI",
-    )
-    parser.add_argument(
-        "--tui",
-        action="store_true",
-        help="Use the legacy fullscreen Textual interface",
     )
     parser.add_argument("--capture", action="store_true", help="Capture model HTTP traffic")
     parser.add_argument("--capture-port", type=int, default=7788)
@@ -240,26 +241,6 @@ def run_lens(
             print(f"{current_id} {event.sequence:04d} {event.timestamp} {event.type}")
 
 
-def run_tui(config, permission_mode, hook_engine) -> None:
-    from lantu.app import LantuApp
-    from lantu.driver import NoAltScreenDriver
-
-    app = LantuApp(
-        providers=config.providers,
-        permission_mode=permission_mode,
-        mcp_servers=config.mcp_servers,
-        hook_engine=hook_engine,
-        enable_fork=config.enable_fork,
-        enable_verification_agent=config.enable_verification_agent,
-        worktree_config=config.worktree,
-        teammate_mode=config.teammate_mode,
-        enable_coordinator_mode=config.enable_coordinator_mode,
-        driver_class=NoAltScreenDriver,
-        sandbox_config=config.sandbox,
-    )
-    app.run()
-
-
 def run_inline(config, permission_mode, hook_engine) -> None:
     from lantu.runtime import build_interactive_runtime
     from lantu.ui.inline import InlineApp
@@ -275,17 +256,17 @@ def run_inline(config, permission_mode, hook_engine) -> None:
             os.getcwd(),
         )
         try:
-            await InlineApp(runtime).run()
+            await InlineApp(
+                runtime,
+                show_thinking=config.ui.show_thinking,
+            ).run()
         finally:
             await runtime.close()
 
     asyncio.run(start())
 
 
-def run_interactive(config, permission_mode, hook_engine, args) -> None:
-    if args.tui:
-        run_tui(config, permission_mode, hook_engine)
-        return
+def run_interactive(config, permission_mode, hook_engine) -> None:
     run_inline(config, permission_mode, hook_engine)
 
 
@@ -326,6 +307,10 @@ def _main() -> None:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
+    if args.tool_loading_mode is not None:
+        config.tool_loading_mode = args.tool_loading_mode
+    tool_loading_mode = getattr(config, "tool_loading_mode", "standard")
+
     mode_str = args.mode if args.mode else config.permission_mode
     permission_mode = PermissionMode(mode_str)
 
@@ -350,6 +335,9 @@ def _main() -> None:
             providers=config.providers,
             mcp_servers=config.mcp_servers,
             hook_engine=hook_engine,
+            show_thinking=config.ui.show_thinking,
+            tool_loading_mode=tool_loading_mode,
+            repo_map_config=getattr(getattr(config, "context", None), "repo_map", None),
         )
         asyncio.run(server.run())
         return
@@ -361,7 +349,7 @@ def _main() -> None:
         )
         sys.exit(1)
 
-    run_interactive(config, permission_mode, hook_engine, args)
+    run_interactive(config, permission_mode, hook_engine)
 
 
 def main() -> None:
@@ -475,6 +463,7 @@ async def _run_prompt_with_client(
     from lantu.tools.team_delete import TeamDeleteTool
     from lantu.worktree import WorktreeManager
     from lantu.config import WorktreeConfig
+    from lantu.context.repo_map import build_repo_map
 
     is_json = output_format == "stream-json"
 
@@ -500,8 +489,18 @@ async def _run_prompt_with_client(
     )
 
     instructions = load_instructions(work_dir)
-    registry = create_default_registry()
+    registry = create_default_registry(
+        loading_mode=getattr(config, "tool_loading_mode", "standard")
+    )
     registry.register(ToolSearchTool(registry, protocol=provider.protocol))
+
+    repo_map_config = getattr(getattr(config, "context", None), "repo_map", None)
+    repo_map = None
+    if repo_map_config is not None and repo_map_config.enabled:
+        repo_map = build_repo_map(
+            work_dir,
+            max_tokens=repo_map_config.max_tokens,
+        )
 
     agent = Agent(
         client=client,
@@ -513,6 +512,7 @@ async def _run_prompt_with_client(
         instructions_content=instructions,
         hook_engine=hook_engine,
         session=session,
+        repo_map=repo_map,
     )
 
     wt_cfg = config.worktree or WorktreeConfig()

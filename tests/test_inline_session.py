@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,9 @@ import pytest
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import to_formatted_text
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.input import DummyInput
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.output import DummyOutput
 
 from lantu.commands.handlers import register_all_commands
 from lantu.commands.registry import Command, CommandRegistry, CommandType
@@ -53,6 +56,30 @@ class FakePromptSession:
     async def prompt_async(self, *args: Any, **kwargs: Any) -> str:
         self.calls.append({"args": args, "kwargs": kwargs})
         return self.responses.pop(0)
+
+
+@pytest.fixture
+def headless_prompt_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompt_session = session_module.PromptSession
+
+    def create_prompt_session(**kwargs: Any):
+        return prompt_session(input=DummyInput(), output=DummyOutput(), **kwargs)
+
+    monkeypatch.setattr(session_module, "PromptSession", create_prompt_session)
+
+
+def _symlink_or_skip(
+    link: Path,
+    target: Path,
+    *,
+    target_is_directory: bool = False,
+) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("creating symbolic links requires Windows Developer Mode or elevation")
+        raise
 
 
 def test_command_registry_completion_contains_help(tmp_path: Path) -> None:
@@ -116,7 +143,10 @@ def test_command_completion_sanitizes_external_display(tmp_path: Path) -> None:
     assert "\n" not in display
 
 
-def test_prompt_session_updates_file_completion_work_dir(tmp_path: Path) -> None:
+def test_prompt_session_updates_file_completion_work_dir(
+    tmp_path: Path,
+    headless_prompt_session: None,
+) -> None:
     original = tmp_path / "original"
     worktree = tmp_path / "worktree"
     original.mkdir()
@@ -161,7 +191,7 @@ def test_scan_files_rejects_parent_and_symlink_escape(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
     (outside / "secret.txt").write_text("secret", encoding="utf-8")
-    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
+    _symlink_or_skip(tmp_path / "linked", outside, target_is_directory=True)
 
     try:
         assert scan_files(str(tmp_path), "../") == []
@@ -175,7 +205,7 @@ def test_scan_files_rejects_symlinked_base_into_hidden_directory(tmp_path: Path)
     hidden = tmp_path / ".hidden"
     hidden.mkdir()
     (hidden / "secret.txt").write_text("secret", encoding="utf-8")
-    (tmp_path / "visible").symlink_to(hidden, target_is_directory=True)
+    _symlink_or_skip(tmp_path / "visible", hidden, target_is_directory=True)
 
     assert scan_files(str(tmp_path), "visible/") == []
 
@@ -187,7 +217,7 @@ def test_scan_files_rejects_entry_resolving_through_skipped_directory(
     dependencies.mkdir()
     target = dependencies / "internal.py"
     target.write_text("secret", encoding="utf-8")
-    (tmp_path / "visible.py").symlink_to(target)
+    _symlink_or_skip(tmp_path / "visible.py", target)
 
     assert scan_files(str(tmp_path), "vis") == []
 
@@ -220,6 +250,7 @@ def test_scan_files_keeps_existing_results_when_entry_resolve_raises(
     assert scan_files(str(tmp_path), "") == ["a.py"]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows forbids control characters in file names")
 def test_scan_files_skips_terminal_control_characters(tmp_path: Path) -> None:
     (tmp_path / "safe.txt").write_text("", encoding="utf-8")
     (tmp_path / "bad\x1b[2J.txt").write_text("", encoding="utf-8")
@@ -345,7 +376,7 @@ def test_expand_at_refs_accepts_sentence_punctuation_and_closing_brackets(
 def test_expand_at_refs_keeps_missing_and_escaped_references(tmp_path: Path) -> None:
     outside = tmp_path.parent / f"{tmp_path.name}-secret.txt"
     outside.write_text("secret", encoding="utf-8")
-    (tmp_path / "linked.txt").symlink_to(outside)
+    _symlink_or_skip(tmp_path / "linked.txt", outside)
 
     try:
         text = "@missing.txt @../secret.txt @linked.txt"
@@ -454,7 +485,7 @@ def test_expand_at_refs_rejects_directory_swap_to_external_symlink(
         if path == canonical_note and not swapped:
             swapped = True
             directory.rename(moved_directory)
-            directory.symlink_to(outside, target_is_directory=True)
+            _symlink_or_skip(directory, outside, target_is_directory=True)
         return original_open(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", swap_then_open)
@@ -547,7 +578,8 @@ async def test_inline_prompt_key_bindings_submit_newline_and_toggle(
 
 @pytest.mark.asyncio
 async def test_inline_prompt_and_text_facade_trim_and_sanitize(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    headless_prompt_session: None,
 ) -> None:
     calls: list[dict[str, Any]] = []
     fake = FakePromptSession(["  message  ", "  answer  "], calls)
@@ -573,6 +605,7 @@ async def test_inline_prompt_and_text_facade_trim_and_sanitize(
 @pytest.mark.asyncio
 async def test_cancelled_prompt_restores_draft_on_next_prompt(
     tmp_path: Path,
+    headless_prompt_session: None,
 ) -> None:
     calls: list[dict[str, Any]] = []
 
@@ -602,7 +635,9 @@ async def test_cancelled_prompt_restores_draft_on_next_prompt(
 
 @pytest.mark.asyncio
 async def test_prompt_restores_real_prompt_session_state_after_choose(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    headless_prompt_session: None,
 ) -> None:
     facade = InlinePromptSession(CommandRegistry(), str(tmp_path), str(tmp_path / "history"))
     prompt_session = facade._session
@@ -627,6 +662,7 @@ async def test_prompt_restores_real_prompt_session_state_after_choose(
 @pytest.mark.asyncio
 async def test_choose_requires_case_sensitive_exact_match(
     tmp_path: Path,
+    headless_prompt_session: None,
 ) -> None:
     calls: list[dict[str, Any]] = []
     facade = InlinePromptSession(CommandRegistry(), str(tmp_path), str(tmp_path / "history"))
@@ -640,7 +676,10 @@ async def test_choose_requires_case_sensitive_exact_match(
 
 
 @pytest.mark.asyncio
-async def test_choose_sanitizes_external_choice_display(tmp_path: Path) -> None:
+async def test_choose_sanitizes_external_choice_display(
+    tmp_path: Path,
+    headless_prompt_session: None,
+) -> None:
     calls: list[dict[str, Any]] = []
     facade = InlinePromptSession(CommandRegistry(), str(tmp_path), str(tmp_path / "history"))
     facade._session = FakePromptSession(["safe"], calls)
@@ -658,6 +697,7 @@ async def test_choose_sanitizes_external_choice_display(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_choose_many_validates_all_values_and_preserves_case(
     tmp_path: Path,
+    headless_prompt_session: None,
 ) -> None:
     calls: list[dict[str, Any]] = []
     facade = InlinePromptSession(CommandRegistry(), str(tmp_path), str(tmp_path / "history"))

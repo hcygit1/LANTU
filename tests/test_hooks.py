@@ -474,7 +474,9 @@ class TestHookEngine:
         await engine.run_hooks("session_start", ctx)
         messages = engine.drain_prompt_messages()
         assert len(messages) == 1
-        assert "Project info" in messages[0]
+        assert messages[0].hook_id == "inject"
+        assert messages[0].event == "session_start"
+        assert "Project info" in messages[0].content
         assert engine.drain_prompt_messages() == []
 
     @pytest.mark.asyncio
@@ -565,3 +567,54 @@ class TestAgentHookIntegration:
         rejected = tool_results[0]
         assert rejected.is_error is True
         assert "Hook rejected" in rejected.output
+
+    @pytest.mark.asyncio
+    async def test_repeated_prompt_hook_is_injected_once(self, tmp_path):
+        from lantu.agent import Agent
+        from lantu.client import LLMClient
+        from lantu.conversation import ConversationManager
+        from lantu.tools import create_default_registry
+        from lantu.tools.base import StreamEnd, TextDelta, ToolCallComplete
+
+        class MockClient(LLMClient):
+            def __init__(self):
+                self._call = 0
+
+            async def stream(self, conversation, system="", tools=None):
+                self._call += 1
+                if self._call == 1:
+                    yield ToolCallComplete(
+                        tool_id="read-1",
+                        tool_name="ReadFile",
+                        arguments={"file_path": "note.txt"},
+                    )
+                    yield StreamEnd("end_turn", input_tokens=10, output_tokens=5)
+                else:
+                    yield TextDelta("done")
+                    yield StreamEnd("end_turn", input_tokens=10, output_tokens=5)
+
+        (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+        hook = Hook(
+            id="project-context",
+            event="pre_send",
+            action=Action(type="prompt", message="Use project rules"),
+        )
+        conversation = ConversationManager()
+        conversation.add_user_message("read the note")
+        agent = Agent(
+            MockClient(),
+            create_default_registry(work_dir=str(tmp_path)),
+            "anthropic",
+            work_dir=str(tmp_path),
+            hook_engine=HookEngine([hook]),
+        )
+
+        async for _event in agent.run(conversation):
+            pass
+
+        reminders = [
+            message
+            for message in conversation.history
+            if message.reminder_key == "hook:project-context:pre_send"
+        ]
+        assert len(reminders) == 1

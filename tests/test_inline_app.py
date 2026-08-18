@@ -756,6 +756,8 @@ async def test_run_prompt_persists_messages_tokens_and_mcp_once(tmp_path: Path) 
     ]
     reminders = [m for m in runtime.conversation.history if "MCP rules" in m.content]
     assert len(reminders) == 1
+    assert reminders[0].reminder_key == "mcp_instructions"
+    assert reminders[0].reminder_hash
     assert runtime.session.meta.total_tokens == 18
 
 

@@ -95,6 +95,50 @@ def test_deferred_not_in_schemas():
     assert "DeferredAlpha" not in names
     assert "DeferredBeta" not in names
 
+
+def test_standard_mode_exposes_deferred_tools_without_tool_search():
+    """Standard mode sends one fixed schema list and needs no ToolSearch."""
+    reg = ToolRegistry(loading_mode="standard")
+    reg.register(_NormalTool())
+    reg.register(_DeferredTool())
+    from lantu.tools.impl.tool_search import ToolSearchTool
+
+    reg.register(ToolSearchTool(reg, protocol="anthropic"))
+
+    names = {schema["name"] for schema in reg.get_all_schemas()}
+    assert names == {"NormalTool", "DeferredAlpha"}
+    assert reg.is_model_visible("DeferredAlpha")
+    assert reg.get_deferred_tool_names() == []
+
+
+def test_schema_epoch_is_stable_until_visible_schemas_change():
+    reg = _make_registry()
+
+    initial = reg.schema_epoch("anthropic")
+    same = reg.schema_epoch("anthropic")
+    assert same.epoch_id == initial.epoch_id
+    assert same.fingerprint == initial.fingerprint
+
+    reg.mark_discovered("DeferredAlpha")
+    changed = reg.schema_epoch("anthropic")
+    assert changed.epoch_id != initial.epoch_id
+    assert changed.visible_tools == ("NormalTool", "DeferredAlpha")
+
+    repeated = reg.schema_epoch("anthropic")
+    assert repeated.epoch_id == changed.epoch_id
+
+
+def test_schema_epoch_differs_between_loading_modes():
+    progressive = _make_registry().schema_epoch("anthropic")
+    standard_registry = ToolRegistry(loading_mode="standard")
+    standard_registry.register(_NormalTool())
+    standard_registry.register(_DeferredTool())
+    standard = standard_registry.schema_epoch("anthropic")
+
+    assert progressive.epoch_id != standard.epoch_id
+    assert "DeferredAlpha" not in progressive.visible_tools
+    assert "DeferredAlpha" in standard.visible_tools
+
 @pytest.mark.asyncio
 async def test_tool_search_marks_discovered():
     """ToolSearchTool.execute 应将工具标记为已发现。"""
@@ -188,9 +232,84 @@ async def test_tool_search_select_multiple():
     result = await search.execute(params)
 
     assert not result.is_error
-    assert "Found 2 tool(s)" in result.output
+    assert result.output == "Loaded tools: DeferredAlpha, DeferredBeta"
+    assert "input_schema" not in result.output
     assert reg.is_discovered("DeferredAlpha")
     assert reg.is_discovered("DeferredBeta")
+
+
+def test_discovery_order_is_preserved_in_schemas():
+    """Discovered schemas append in discovery order, not registration order."""
+    reg = _make_registry()
+    reg.mark_discovered("DeferredBeta")
+    reg.mark_discovered("DeferredAlpha")
+
+    names = [schema["name"] for schema in reg.get_all_schemas()]
+
+    assert names == ["NormalTool", "DeferredBeta", "DeferredAlpha"]
+
+
+def test_deferred_tool_is_not_model_visible_until_discovered():
+    """A hidden deferred tool cannot be called by guessing its registered name."""
+    reg = _make_registry()
+
+    assert not reg.is_model_visible("DeferredAlpha")
+    reg.mark_discovered("DeferredAlpha")
+    assert reg.is_model_visible("DeferredAlpha")
+
+
+@pytest.mark.asyncio
+async def test_repeated_discovery_does_not_duplicate_schema():
+    """Loading the same deferred tool twice keeps one schema and one order entry."""
+    reg = _make_registry()
+    search = ToolSearchTool(reg, protocol="anthropic")
+    reg.register(search)
+
+    from lantu.tools.impl.tool_search import ToolSearchParams
+
+    await search.execute(ToolSearchParams(query="select:DeferredAlpha"))
+    repeated = await search.execute(ToolSearchParams(query="select:DeferredAlpha"))
+
+    assert "No matching deferred tools" in repeated.output
+    names = [schema["name"] for schema in reg.get_all_schemas()]
+    assert names.count("DeferredAlpha") == 1
+
+
+def test_discovered_tool_states_include_ordered_schema_hashes():
+    """Journal state contains stable hashes in the actual discovery order."""
+    reg = _make_registry()
+    reg.mark_discovered("DeferredBeta")
+    reg.mark_discovered("DeferredAlpha")
+
+    states = reg.discovered_tool_states()
+
+    assert [state["name"] for state in states] == [
+        "DeferredBeta",
+        "DeferredAlpha",
+    ]
+    assert all(len(state["schema_hash"]) == 64 for state in states)
+
+
+def test_restore_discovered_replays_state_and_rejects_schema_mismatch():
+    """Recovery restores the same tools and fails closed on a changed Schema."""
+    source = _make_registry()
+    source.mark_discovered("DeferredBeta")
+    source.mark_discovered("DeferredAlpha")
+    states = source.discovered_tool_states()
+
+    restored = _make_registry()
+    restored.restore_discovered(states)
+    assert [state["name"] for state in restored.discovered_tool_states()] == [
+        "DeferredBeta",
+        "DeferredAlpha",
+    ]
+
+    mismatch = _make_registry()
+    invalid_states = [dict(state) for state in states]
+    invalid_states[0]["schema_hash"] = "changed"
+    with pytest.raises(ValueError, match="schema changed"):
+        mismatch.restore_discovered(invalid_states)
+    assert mismatch.discovered_tool_states() == []
 
 # ---------------------------------------------------------------------------
 # 延迟加载：token 节省量与端到端发现流程

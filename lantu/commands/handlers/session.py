@@ -64,14 +64,24 @@ async def handle_session(ctx: CommandContext) -> None:
         if result is None:
             ctx.ui.add_system_message(f"会话未找到: {session_id}")
             return
+        if ctx.agent is not None:
+            try:
+                ctx.agent.registry.reset_discovered()
+                ctx.agent.registry.restore_discovered(result.session.loaded_tool_states)
+            except Exception as exc:
+                result.session.close()
+                ctx.ui.add_system_message(f"会话工具状态无法恢复: {exc}")
+                return
         if ctx.session:
             ctx.session.stop_runtime("session_switch")
             ctx.session.close()
         result.session.start_runtime("resume")
+        if ctx.agent is not None:
+            lock_mode = getattr(ctx.agent, "lock_tool_loading_mode", None)
+            if callable(lock_mode):
+                lock_mode()
         ctx.config["set_session"](result.session)
-        conv = ConversationManager()
-        for msg in result.messages:
-            conv.history.append(msg)
+        conv = ConversationManager(history=list(result.messages))
         ctx.config["set_conversation"](conv)
         if ctx.agent:
             ctx.agent._loop_count = 0
@@ -85,12 +95,17 @@ async def handle_session(ctx: CommandContext) -> None:
         if ctx.session:
             ctx.session.stop_runtime("session_switch")
             ctx.session.close()
+        if ctx.agent is not None:
+            ctx.agent.registry.reset_discovered()
         new_session = sm.create()
         new_session.start_runtime("new")
         ctx.config["set_session"](new_session)
         ctx.config["set_conversation"](ConversationManager())
         if ctx.agent:
             ctx.agent._loop_count = 0
+            unlock_mode = getattr(ctx.agent, "unlock_tool_loading_mode", None)
+            if callable(unlock_mode):
+                unlock_mode()
         ctx.config["clear_chat"]()
         ctx.ui.add_system_message(f"新会话已创建: {new_session.session_id}")
 

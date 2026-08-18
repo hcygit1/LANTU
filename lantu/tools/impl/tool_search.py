@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from pydantic import BaseModel
@@ -26,6 +25,7 @@ class ToolSearchTool(Tool):
     params_model = ToolSearchParams
     category = "read"
     should_defer = False  # ToolSearch 自身永远不延迟加载
+    expose_in_standard = False
 
 
     def __init__(
@@ -53,14 +53,15 @@ class ToolSearchTool(Tool):
         max_results = params.max_results
 
         if query.startswith("select:"):
-            names = [n.strip() for n in query[7:].split(",")]
-            schemas = self._registry.find_deferred_by_names(names, self._protocol)
+            names = [n.strip() for n in query[7:].split(",") if n.strip()]
+            candidates = self._registry.find_deferred_names(names)
         else:
-            schemas = self._registry.search_deferred(
-                query, max_results, self._protocol
-            )
+            candidates = self._registry.search_deferred_names(query, max_results)
 
-        if not schemas:
+        loaded_names = [
+            name for name in candidates if self._registry.mark_discovered(name)
+        ]
+        if not loaded_names:
             deferred_names = self._registry.get_deferred_tool_names()
             return ToolResult(
                 output=(
@@ -69,13 +70,7 @@ class ToolSearchTool(Tool):
                 )
             )
 
-        for s in schemas:
-            if "name" in s:
-                self._registry.mark_discovered(s["name"])
-
         return ToolResult(
-            output=(
-                f"Found {len(schemas)} tool(s). Their full schemas are now loaded:\n\n"
-                f"{json.dumps(schemas, indent=2, ensure_ascii=False)}"
-            )
+            output=f"Loaded tools: {', '.join(loaded_names)}",
+            meta={"loaded_tools": self._registry.discovered_tool_states(loaded_names)},
         )

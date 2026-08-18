@@ -13,6 +13,7 @@ VALID_PERMISSION_MODES = {
 
 VALID_TEAMMATE_MODES = {"", "in-process"}
 VALID_REASONING_EFFORTS = {"", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
+VALID_TOOL_LOADING_MODES = {"standard", "progressive"}
 
 DEFAULT_CONTEXT_WINDOW = 200_000
 
@@ -220,6 +221,16 @@ def validate_teammate_mode(mode: object) -> str:
     return mode
 
 
+def validate_tool_loading_mode(mode: object) -> str:
+    """校验工具 Schema 的加载模式。"""
+    if not isinstance(mode, str) or mode not in VALID_TOOL_LOADING_MODES:
+        raise ConfigError(
+            f"Invalid tool_loading_mode '{mode}', "
+            f"must be one of: {', '.join(sorted(VALID_TOOL_LOADING_MODES))}"
+        )
+    return mode
+
+
 def validate_sandbox(raw_sb: dict | None) -> dict:
     """校验 sandbox 配置段，返回清洗后的配置字典。"""
     defaults = {
@@ -245,13 +256,77 @@ def validate_sandbox(raw_sb: dict | None) -> dict:
     return result
 
 
+def validate_ui(raw_ui: dict | None) -> dict:
+    """Validate user-interface display settings."""
+    if raw_ui is None:
+        return {
+            "show_thinking": False,
+            "explicit_fields": frozenset(),
+        }
+
+    if not isinstance(raw_ui, dict):
+        raise ConfigError("'ui' must be a mapping")
+
+    show_thinking = raw_ui.get("show_thinking", False)
+    if not isinstance(show_thinking, bool):
+        raise ConfigError("'ui.show_thinking' must be a boolean")
+
+    return {
+        "show_thinking": show_thinking,
+        "explicit_fields": frozenset(
+            field for field in ("show_thinking",) if field in raw_ui
+        ),
+    }
+
+
+def validate_context(raw_context: dict | None) -> dict:
+    """Validate context-management settings."""
+    if raw_context is None:
+        return {
+            "repo_map": {
+                "enabled": False,
+                "max_tokens": 4_000,
+                "explicit_fields": frozenset(),
+            }
+        }
+    if not isinstance(raw_context, dict):
+        raise ConfigError("'context' must be a mapping")
+
+    raw_repo_map = raw_context.get("repo_map")
+    if raw_repo_map is None:
+        raw_repo_map = {}
+    if not isinstance(raw_repo_map, dict):
+        raise ConfigError("'context.repo_map' must be a mapping")
+
+    enabled = raw_repo_map.get("enabled", False)
+    if not isinstance(enabled, bool):
+        raise ConfigError("'context.repo_map.enabled' must be a boolean")
+    max_tokens = raw_repo_map.get("max_tokens", 4_000)
+    if (
+        not isinstance(max_tokens, int)
+        or isinstance(max_tokens, bool)
+        or max_tokens <= 0
+    ):
+        raise ConfigError("'context.repo_map.max_tokens' must be a positive integer")
+
+    return {
+        "repo_map": {
+            "enabled": enabled,
+            "max_tokens": max_tokens,
+            "explicit_fields": frozenset(
+                field for field in ("enabled", "max_tokens") if field in raw_repo_map
+            ),
+        }
+    }
+
+
 def validate_config_structure(raw: object) -> dict:
     """校验的主入口。校验解析后的原始配置，返回清洗后的字典。
 
     返回的字典包含以下键：
         providers、permission_mode、mcp_servers、hooks、
         enable_fork、enable_verification_agent、worktree、
-        teammate_mode、enable_coordinator_mode、sandbox
+        teammate_mode、enable_coordinator_mode、tool_loading_mode、sandbox、ui、context
     """
     if not isinstance(raw, dict) or "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
@@ -267,8 +342,14 @@ def validate_config_structure(raw: object) -> dict:
         ),
         "worktree": validate_worktree(raw.get("worktree")),
         "teammate_mode": validate_teammate_mode(raw.get("teammate_mode", "")),
+        "tool_loading_mode": validate_tool_loading_mode(
+            raw.get("tool_loading_mode", "standard")
+        ),
+        "tool_loading_mode_explicit": "tool_loading_mode" in raw,
         "enable_coordinator_mode": validate_bool_field(
             raw.get("enable_coordinator_mode", False), "enable_coordinator_mode"
         ),
         "sandbox": validate_sandbox(raw.get("sandbox")),
+        "ui": validate_ui(raw.get("ui")),
+        "context": validate_context(raw.get("context")),
     }

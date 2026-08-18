@@ -38,6 +38,7 @@ def make_config():
         teammate_mode="in-process",
         enable_coordinator_mode=True,
         sandbox=object(),
+        ui=SimpleNamespace(show_thinking=False),
     )
 
 
@@ -73,10 +74,9 @@ def install_inline_dependencies(
     monkeypatch.setitem(sys.modules, "lantu.ui.inline", inline_module)
 
 
-def test_tui_flag_is_available() -> None:
-    args = build_parser().parse_args(["--tui"])
-
-    assert args.tui is True
+def test_tui_flag_is_rejected() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--tui"])
 
 
 def test_capture_flags_are_available() -> None:
@@ -109,39 +109,14 @@ def test_default_interactive_mode_uses_inline(monkeypatch) -> None:
     monkeypatch.setattr(
         "lantu.__main__.run_inline", lambda *args: called.append(("inline", args))
     )
-    monkeypatch.setattr(
-        "lantu.__main__.run_tui", lambda *args: called.append(("tui", args))
-    )
-
     config = make_config()
     run_interactive(
         config,
         PermissionMode.DEFAULT,
         None,
-        build_parser().parse_args([]),
     )
 
     assert called == [("inline", (config, PermissionMode.DEFAULT, None))]
-
-
-def test_tui_flag_uses_legacy_frontend(monkeypatch) -> None:
-    called = []
-    monkeypatch.setattr(
-        "lantu.__main__.run_inline", lambda *args: called.append(("inline", args))
-    )
-    monkeypatch.setattr(
-        "lantu.__main__.run_tui", lambda *args: called.append(("tui", args))
-    )
-
-    config = make_config()
-    run_interactive(
-        config,
-        PermissionMode.DEFAULT,
-        None,
-        build_parser().parse_args(["--tui"]),
-    )
-
-    assert called == [("tui", (config, PermissionMode.DEFAULT, None))]
 
 
 def test_run_inline_builds_runtime_in_current_directory(monkeypatch, tmp_path) -> None:
@@ -155,8 +130,8 @@ def test_run_inline_builds_runtime_in_current_directory(monkeypatch, tmp_path) -
     runtime = Runtime()
 
     class InlineApp:
-        def __init__(self, value) -> None:
-            calls.append(("InlineApp", value))
+        def __init__(self, value, **kwargs) -> None:
+            calls.append(("InlineApp", value, kwargs))
 
         async def run(self) -> None:
             calls.append(("run", None))
@@ -171,6 +146,7 @@ def test_run_inline_builds_runtime_in_current_directory(monkeypatch, tmp_path) -
     monkeypatch.chdir(tmp_path)
 
     config = make_config()
+    config.ui.show_thinking = True
     run_inline(config, PermissionMode.PLAN, None)
 
     assert calls == [
@@ -179,7 +155,7 @@ def test_run_inline_builds_runtime_in_current_directory(monkeypatch, tmp_path) -
             "build_interactive_runtime",
             (config, provider, PermissionMode.PLAN, None, os.getcwd()),
         ),
-        ("InlineApp", runtime),
+        ("InlineApp", runtime, {"show_thinking": True}),
         ("run", None),
         ("close", None),
     ]
@@ -193,7 +169,7 @@ def test_run_inline_closes_runtime_when_app_construction_fails(monkeypatch) -> N
             calls.append("close")
 
     class BrokenInlineApp:
-        def __init__(self, _runtime) -> None:
+        def __init__(self, _runtime, **_kwargs) -> None:
             raise RuntimeError("construction failed")
 
     install_inline_dependencies(
@@ -289,7 +265,7 @@ async def test_run_prompt_closes_client_after_cancellation(monkeypatch, tmp_path
     assert client.close_calls == 1
 
 
-def test_importing_cli_does_not_load_textual_or_legacy_app() -> None:
+def test_importing_cli_does_not_load_removed_legacy_frontend() -> None:
     code = (
         "import sys; import lantu.__main__; "
         "assert 'lantu.app' not in sys.modules; "
@@ -316,7 +292,7 @@ def test_prompt_mode_has_priority_and_does_not_require_tty(monkeypatch) -> None:
 
     prepare_main(
         monkeypatch,
-        ["-p", "hello", "--remote", "--tui", "--output-format", "stream-json"],
+        ["-p", "hello", "--remote", "--output-format", "stream-json"],
     )
     monkeypatch.setattr("lantu.__main__._run_prompt", run_prompt)
     monkeypatch.setattr(
@@ -331,7 +307,7 @@ def test_prompt_mode_has_priority_and_does_not_require_tty(monkeypatch) -> None:
     assert calls[0][1][3:] == ("hello", "stream-json")
 
 
-def test_remote_mode_has_priority_over_tui_and_does_not_require_tty(monkeypatch) -> None:
+def test_remote_mode_does_not_require_tty(monkeypatch) -> None:
     calls = []
     remote_module = ModuleType("lantu.remote")
 
@@ -343,7 +319,9 @@ def test_remote_mode_has_priority_over_tui_and_does_not_require_tty(monkeypatch)
             calls.append(("remote_run", None))
 
     remote_module.RemoteServer = RemoteServer
-    prepare_main(monkeypatch, ["--remote", "--tui"])
+    config = make_config()
+    config.ui.show_thinking = True
+    prepare_main(monkeypatch, ["--remote"], config)
     monkeypatch.setitem(sys.modules, "lantu.remote", remote_module)
     monkeypatch.setattr(
         "lantu.__main__.run_interactive", lambda *args: calls.append(("interactive", args))
@@ -354,14 +332,14 @@ def test_remote_mode_has_priority_over_tui_and_does_not_require_tty(monkeypatch)
     main()
 
     assert [name for name, _value in calls] == ["remote_init", "remote_run"]
+    assert calls[0][1]["show_thinking"] is True
 
 
 @pytest.mark.parametrize("non_tty_stream", ["stdin", "stdout"])
-@pytest.mark.parametrize("argv", [[], ["--tui"]])
 def test_interactive_modes_require_stdin_and_stdout_tty(
-    monkeypatch, non_tty_stream, argv
+    monkeypatch, non_tty_stream
 ) -> None:
-    prepare_main(monkeypatch, argv)
+    prepare_main(monkeypatch, [])
     stdin = TTYStream(True)
     stdout = TTYStream(True)
     stderr = TTYStream(True)

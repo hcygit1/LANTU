@@ -58,6 +58,7 @@ class InlineApp:
         prompt: Any | None = None,
         transcript: Any | None = None,
         live: Any | None = None,
+        show_thinking: bool = False,
     ) -> None:
         self.runtime = runtime
         self.console = console or Console()
@@ -77,6 +78,7 @@ class InlineApp:
             self.live,
             self.transcript,
             permission_handler=self.handle_permission,
+            show_thinking=show_thinking,
         )
         ask_user_tool = self.runtime.registry.get("AskUserQuestion")
         if isinstance(ask_user_tool, AskUserTool):
@@ -91,7 +93,6 @@ class InlineApp:
             if self.agent.permission_mode is PermissionMode.PLAN
             else self.agent.permission_mode
         )
-        self._mcp_injected = False
         self._agent_task: asyncio.Task[None] | None = None
         self._turn_cancel_requested = False
         self._processing_notifications = False
@@ -252,6 +253,10 @@ class InlineApp:
             self.runtime.refresh_skills_if_needed()
             await self.runtime.wait_until_ready()
             self._drain_startup_messages()
+            if text and not is_notification:
+                lock_mode = getattr(self.agent, "lock_tool_loading_mode", None)
+                if callable(lock_mode):
+                    lock_mode()
             self.runtime.session.start_turn(
                 "notification" if is_notification else "user"
             )
@@ -273,11 +278,11 @@ class InlineApp:
                 self.runtime.conversation.add_user_message(text)
                 self.runtime.session.append(Message(role="user", content=text))
 
-            if self.runtime.mcp_instructions and not self._mcp_injected:
+            if self.runtime.mcp_instructions:
                 self.runtime.conversation.add_system_reminder(
-                    self.runtime.mcp_instructions
+                    self.runtime.mcp_instructions,
+                    reminder_key="mcp_instructions",
                 )
-                self._mcp_injected = True
 
             if prefetch_task is not None:
                 self.agent.memory_recall_task = prefetch_task
@@ -596,7 +601,6 @@ class InlineApp:
     def _set_conversation(self, conversation: ConversationManager) -> None:
         self.runtime.conversation = conversation
         self.conversation = conversation
-        self._mcp_injected = False
 
     async def _render_restored(self, messages: list[Message]) -> None:
         for message in messages:

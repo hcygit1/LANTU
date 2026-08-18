@@ -26,6 +26,7 @@ MEMORY_PREFETCH_TIMEOUT = 8.0
 
 def switch_runtime_work_dir(runtime: InteractiveRuntime, path: str) -> None:
     runtime.agent.work_dir = path
+    runtime.agent.retarget_repo_map(path)
     runtime.permission_checker.sandbox = PathSandbox(path)
     for tool in runtime.registry.list_tools():
         tool.work_dir = path

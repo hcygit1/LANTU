@@ -126,7 +126,7 @@ def resolve_agent_tools(
             if name in allowed_set
         }
 
-    filtered = ToolRegistry()
+    filtered = ToolRegistry(loading_mode=parent_registry.loading_mode)
     for tool in mcp_tools.values():
         filtered.register(tool)
     for tool in all_tools.values():
@@ -183,7 +183,7 @@ def build_teammate_tools(
         SendMessageTool(team_manager, team_name, agent_id, agent_name),
     ]
 
-    registry = ToolRegistry()
+    registry = ToolRegistry(loading_mode=parent_registry.loading_mode)
     for tool in filtered.values():
         registry.register(tool)
     for tool in coordination_tools:
@@ -203,7 +203,7 @@ def clone_registry_for_fork(parent_registry: ToolRegistry) -> ToolRegistry:
 
     from lantu.tools.agent_tool import FORK_QUERY_SOURCE
 
-    forked = ToolRegistry()
+    forked = ToolRegistry(loading_mode=parent_registry.loading_mode)
     for tool in parent_registry.list_tools():
         if tool.name == "Agent" and hasattr(tool, "query_source"):
             clone = copy.copy(tool)
@@ -216,7 +216,7 @@ def clone_registry_for_fork(parent_registry: ToolRegistry) -> ToolRegistry:
 
 def apply_coordinator_filter(registry: ToolRegistry) -> ToolRegistry:
     all_tools = {t.name: t for t in registry.list_tools()}
-    filtered = ToolRegistry()
+    filtered = ToolRegistry(loading_mode=registry.loading_mode)
     for name, tool in all_tools.items():
         if _is_mcp_tool(name) or name in COORDINATOR_MODE_ALLOWED_TOOLS:
             filtered.register(tool)

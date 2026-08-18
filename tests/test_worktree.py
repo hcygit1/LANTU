@@ -92,6 +92,12 @@ class TestFileCache:
         cache = FileCache()
         assert cache.get("/nonexistent") is None
 
+    def test_mtime_mismatch_invalidates_cached_content(self):
+        cache = FileCache()
+        cache.put("/tmp/test.py", "old", mtime_ns=1)
+        assert cache.get("/tmp/test.py", mtime_ns=2) is None
+        assert cache.get("/tmp/test.py") is None
+
     def test_invalidate(self):
         cache = FileCache()
         cache.put("/tmp/test.py", "content")

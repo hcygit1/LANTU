@@ -137,9 +137,39 @@ class SandboxAppConfig:
 
 
 @dataclass
+class UIConfig:
+    """Human-facing display settings, independent from model behavior."""
+
+    show_thinking: bool = False
+    _explicit_fields: frozenset[str] = field(
+        default_factory=frozenset,
+        repr=False,
+        compare=False,
+    )
+
+
+@dataclass
+class RepoMapConfig:
+    enabled: bool = False
+    max_tokens: int = 4_000
+    _explicit_fields: frozenset[str] = field(
+        default_factory=frozenset,
+        repr=False,
+        compare=False,
+    )
+
+
+@dataclass
+class ContextConfig:
+    repo_map: RepoMapConfig = field(default_factory=RepoMapConfig)
+
+
+@dataclass
 class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
+    tool_loading_mode: str = "standard"
+    tool_loading_mode_explicit: bool = field(default=False, repr=False, compare=False)
     mcp_servers: list[MCPServerConfig] = field(default_factory=list)
     raw_hooks: list[dict] = field(default_factory=list)
     enable_fork: bool = False
@@ -148,6 +178,8 @@ class AppConfig:
     teammate_mode: str = ""
     enable_coordinator_mode: bool = False
     sandbox: SandboxAppConfig = field(default_factory=SandboxAppConfig)
+    ui: UIConfig = field(default_factory=UIConfig)
+    context: ContextConfig = field(default_factory=ContextConfig)
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -199,9 +231,26 @@ def _load_single_file(path: Path) -> AppConfig:
         network_enabled=sb["network_enabled"],
     )
 
+    ui = validated["ui"]
+    ui_cfg = UIConfig(
+        show_thinking=ui["show_thinking"],
+        _explicit_fields=ui["explicit_fields"],
+    )
+
+    repo_map = validated["context"]["repo_map"]
+    context_cfg = ContextConfig(
+        repo_map=RepoMapConfig(
+            enabled=repo_map["enabled"],
+            max_tokens=repo_map["max_tokens"],
+            _explicit_fields=repo_map["explicit_fields"],
+        )
+    )
+
     return AppConfig(
         providers=providers,
         permission_mode=validated["permission_mode"],
+        tool_loading_mode=validated["tool_loading_mode"],
+        tool_loading_mode_explicit=validated["tool_loading_mode_explicit"],
         mcp_servers=mcp_servers,
         raw_hooks=validated["hooks"],
         enable_fork=validated["enable_fork"],
@@ -210,6 +259,8 @@ def _load_single_file(path: Path) -> AppConfig:
         teammate_mode=validated["teammate_mode"],
         enable_coordinator_mode=validated["enable_coordinator_mode"],
         sandbox=sandbox_cfg,
+        ui=ui_cfg,
+        context=context_cfg,
     )
 
 
@@ -218,6 +269,8 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.providers = override.providers
     if override.permission_mode != "default":
         base.permission_mode = override.permission_mode
+    if override.tool_loading_mode_explicit:
+        base.tool_loading_mode = override.tool_loading_mode
 
     if override.mcp_servers:
         by_name = {s.name: i for i, s in enumerate(base.mcp_servers)}
@@ -244,6 +297,13 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.sandbox.auto_allow = True
     if override.sandbox.network_enabled:
         base.sandbox.network_enabled = True
+    if "show_thinking" in override.ui._explicit_fields:
+        base.ui.show_thinking = override.ui.show_thinking
+    repo_map_fields = override.context.repo_map._explicit_fields
+    if "enabled" in repo_map_fields:
+        base.context.repo_map.enabled = override.context.repo_map.enabled
+    if "max_tokens" in repo_map_fields:
+        base.context.repo_map.max_tokens = override.context.repo_map.max_tokens
     return base
 
 

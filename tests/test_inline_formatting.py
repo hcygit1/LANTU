@@ -28,9 +28,11 @@ def test_shorten_home_replaces_home_prefix(monkeypatch):
         classmethod(lambda cls: Path("/Users/demo")),
     )
 
-    assert shorten_home("/Users/demo/work/repo") == "~/work/repo"
+    assert shorten_home("/Users/demo/work/repo") == str(Path("~") / "work" / "repo")
     assert shorten_home("/Users/demo") == "~"
-    assert shorten_home("/Users/demonstration/repo") == "/Users/demonstration/repo"
+    assert shorten_home("/Users/demonstration/repo") == str(
+        Path("/Users/demonstration/repo")
+    )
 
 
 def test_shorten_home_uses_path_separator_semantics(monkeypatch):

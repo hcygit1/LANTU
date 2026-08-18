@@ -24,12 +24,16 @@ from lantu.memory.session import (
     SessionMeta,
     generate_session_summary,
 )
+from lantu.memory.file_ledger import FileLedger, FileLedgerEntry, FileReadObservation
 
 
 __all__ = [
     "ENTRYPOINT_NAME",
     "MemoryFile",
     "MemoryManager",
+    "FileLedger",
+    "FileLedgerEntry",
+    "FileReadObservation",
     "RelevantMemory",
     "ExecutionEvent",
     "ResumeResult",

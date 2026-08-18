@@ -16,6 +16,7 @@ ToolCategory = Literal["read", "write", "command"]
 class ToolResult:
     output: str
     is_error: bool = False
+    meta: dict[str, Any] | None = None
 
 
 class Tool(ABC):

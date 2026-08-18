@@ -122,7 +122,7 @@ async def test_build_runtime_registers_engineering_tools_and_closes_twice(
     await runtime.close()
 
     assert sleeper.cancelled()
-    assert runtime.session._file.closed
+    assert runtime.session.closed
     assert offline_builder.close_calls == 1
 
 
@@ -392,7 +392,7 @@ async def test_close_still_closes_session_when_close_task_is_cancelled(
     try:
         with pytest.raises(asyncio.CancelledError):
             await close_task
-        assert runtime.session._file.closed
+        assert runtime.session.closed
         assert not background.done()
     finally:
         release.set()
@@ -509,7 +509,7 @@ async def test_close_does_not_wait_for_stubborn_background_task(
         assert time.monotonic() - started < 0.1
         assert cancelled.is_set()
         assert not background.done()
-        assert runtime.session._file.closed
+        assert runtime.session.closed
     finally:
         release.set()
         await asyncio.gather(background, return_exceptions=True)
@@ -549,7 +549,7 @@ async def test_close_uses_one_total_deadline_for_all_async_cleanup(
 
     try:
         assert time.monotonic() - started < 0.12
-        assert runtime.session._file.closed
+        assert runtime.session.closed
         assert any(not task.done() for task in cleanup_tasks)
     finally:
         release.set()
@@ -596,7 +596,7 @@ async def test_close_detaches_blocking_mailbox_cleanup_at_deadline(
     try:
         assert time.monotonic() - began < 0.1
         assert started.is_set()
-        assert runtime.session._file.closed
+        assert runtime.session.closed
         assert directory_calls == []
     finally:
         watchdog.cancel()
@@ -639,7 +639,7 @@ async def test_partial_build_failure_closes_created_session(
             tmp_path,
         )
 
-    assert created_sessions[0]._file.closed
+    assert created_sessions[0].closed
     assert offline_builder.close_calls == 1
 
 
@@ -650,13 +650,12 @@ async def test_core_build_failure_closes_created_client(
     offline_builder: FakeClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        runtime_builder.SessionManager,
-        "cleanup",
-        lambda _self: (_ for _ in ()).throw(RuntimeError("cleanup failed")),
-    )
+    def fail_permission_checker(**_kwargs):
+        raise RuntimeError("permission setup failed")
 
-    with pytest.raises(RuntimeError, match="cleanup failed"):
+    monkeypatch.setattr(runtime_builder, "PermissionChecker", fail_permission_checker)
+
+    with pytest.raises(RuntimeError, match="permission setup failed"):
         await build_interactive_runtime(
             AppConfig(providers=[provider]),
             provider,

@@ -18,6 +18,7 @@ from lantu.commands.handlers.worktree import create_worktree_command
 from lantu.commands.registry import CommandRegistry
 from lantu.config import AppConfig, ProviderConfig
 from lantu.conversation import ConversationManager
+from lantu.context.repo_map import build_repo_map
 from lantu.filehistory import FileHistory
 from lantu.hooks import HookContext, HookEngine
 from lantu.memory import MemoryManager, SessionManager, load_instructions
@@ -120,6 +121,7 @@ async def _build_core(
             file_cache=file_cache,
             file_history=file_history,
             work_dir=work_dir_str,
+            loading_mode=config.tool_loading_mode,
         )
         for tool in registry.list_tools():
             if hasattr(tool, "file_history"):
@@ -142,6 +144,14 @@ async def _build_core(
                         network_enabled=config.sandbox.network_enabled,
                     )
 
+        repo_map_config = getattr(getattr(config, "context", None), "repo_map", None)
+        repo_map = None
+        if repo_map_config is not None and repo_map_config.enabled:
+            repo_map = build_repo_map(
+                work_dir,
+                max_tokens=repo_map_config.max_tokens,
+            )
+
         agent = Agent(
             client=client,
             registry=registry,
@@ -153,6 +163,7 @@ async def _build_core(
             memory_manager=memory_manager,
             hook_engine=hook_engine,
             session=session,
+            repo_map=repo_map,
         )
         agent.file_history = file_history
         agent.session_id = session.session_id
@@ -362,6 +373,10 @@ async def build_interactive_runtime(
     try:
         _register_skills(runtime)
         _register_worktree_and_agents(runtime)
+        get_notice = getattr(runtime.agent, "tool_loading_notice", None)
+        notice = get_notice() if callable(get_notice) else None
+        if notice:
+            runtime.startup_messages.append(notice)
         await _start_runtime_services(runtime)
         return runtime
     except BaseException:

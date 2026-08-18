@@ -32,10 +32,12 @@ class InlineEventHandler:
         live: LiveRenderer,
         transcript: TranscriptRenderer,
         permission_handler: PermissionHandler | None = None,
+        show_thinking: bool = False,
     ) -> None:
         self.live = live
         self.transcript = transcript
         self.permission_handler = permission_handler
+        self.show_thinking = show_thinking
         self.state = LiveViewState()
         self.last_tool: ToolViewState | None = None
         self._completed_tool_ids: set[str] = set()
@@ -59,7 +61,8 @@ class InlineEventHandler:
             self.state.is_waiting = False
             self.state.assistant_text += event.text
         elif isinstance(event, ThinkingText):
-            pass
+            if self.show_thinking:
+                self.state.thinking_text += event.text
         elif isinstance(event, ToolUseEvent):
             self.state.is_waiting = False
             self._commit_assistant()

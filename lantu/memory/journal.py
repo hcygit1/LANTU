@@ -27,6 +27,10 @@ EVENT_TYPES = frozenset(
         "tool.completed",
         "tool.failed",
         "tool.interrupted",
+        "tool.schema.loaded",
+        "tool.schema.epoch.changed",
+        "file.observed",
+        "file.updated",
         "permission.decided",
         "error.occurred",
         "model.request.started",
@@ -117,6 +121,10 @@ class SessionJournal:
         except Exception:
             self._lock.release()
             raise
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
 
     def append(
         self,

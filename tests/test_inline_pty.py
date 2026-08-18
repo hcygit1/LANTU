@@ -7,6 +7,7 @@ import re
 from typing import Iterator
 
 import pexpect
+import pytest
 
 
 FIXTURE = "tests/fixtures/run_inline_fake.py"
@@ -61,6 +62,8 @@ def assert_terminal_restored(output: bytes) -> None:
 def spawn_inline(
     *, rows: int = 24, cols: int = 80
 ) -> Iterator[tuple[pexpect.spawn, BytesIO]]:
+    if not hasattr(pexpect, "spawn"):
+        pytest.skip("pexpect.spawn requires a POSIX PTY")
     output = BytesIO()
     child = pexpect.spawn(
         PYTHON,

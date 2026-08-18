@@ -18,10 +18,17 @@ class HookNotification:
     success: bool
 
 
+@dataclass(frozen=True)
+class HookPrompt:
+    hook_id: str
+    event: str
+    content: str
+
+
 class HookEngine:
     def __init__(self, hooks: list[Hook] | None = None) -> None:
         self.hooks: list[Hook] = hooks or []
-        self._prompt_messages: list[str] = []
+        self._prompt_messages: list[HookPrompt] = []
         self._notifications: list[HookNotification] = []
 
 
@@ -52,7 +59,13 @@ class HookEngine:
         try:
             result = await execute_action(hook.action, ctx)
             if hook.action.type == "prompt" and result.success:
-                self._prompt_messages.append(result.output)
+                self._prompt_messages.append(
+                    HookPrompt(
+                        hook_id=hook.id,
+                        event=hook.event,
+                        content=result.output,
+                    )
+                )
             self._notifications.append(
                 HookNotification(
                     hook_id=hook.id,
@@ -103,7 +116,7 @@ class HookEngine:
                 log.warning("Hook '%s' execution error: %s", hook.id, e)
         return None
 
-    def drain_prompt_messages(self) -> list[str]:
+    def drain_prompt_messages(self) -> list[HookPrompt]:
         messages = list(self._prompt_messages)
         self._prompt_messages.clear()
         return messages

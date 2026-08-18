@@ -6,6 +6,8 @@ from lantu.context.manager import (
     FileReadRecord,
     RecoveryState,
     SkillInvocationRecord,
+    PreparedToolResults,
+    ToolResultPresentation,
     UsageAnchor,
     auto_compact,
     build_compact_messages,
@@ -14,6 +16,7 @@ from lantu.context.manager import (
     compute_compact_threshold,
     ensure_session_dir,
     prepare_tool_results,
+    prepare_tool_results_with_metadata,
 )
 
 
@@ -24,6 +27,8 @@ __all__ = [
     "FileReadRecord",
     "RecoveryState",
     "SkillInvocationRecord",
+    "PreparedToolResults",
+    "ToolResultPresentation",
     "UsageAnchor",
     "auto_compact",
     "build_compact_messages",
@@ -32,5 +37,6 @@ __all__ = [
     "compute_compact_threshold",
     "ensure_session_dir",
     "prepare_tool_results",
+    "prepare_tool_results_with_metadata",
 ]
 

@@ -341,6 +341,22 @@ async def test_waiting_state_hides_raw_thinking_content():
 
 
 @pytest.mark.asyncio
+async def test_show_thinking_exposes_raw_thinking_content():
+    live = FakeLiveRenderer()
+    handler = InlineEventHandler(
+        live,
+        FakeTranscript(),
+        show_thinking=True,
+    )
+
+    handler.start_waiting()
+    await handler.handle(ThinkingText("visible reasoning"))
+
+    assert live.states[-1].is_waiting is True
+    assert live.states[-1].thinking_text == "visible reasoning"
+
+
+@pytest.mark.asyncio
 async def test_usage_without_dynamic_content_does_not_create_live_region():
     live = FakeLiveRenderer()
     handler = InlineEventHandler(live, FakeTranscript())

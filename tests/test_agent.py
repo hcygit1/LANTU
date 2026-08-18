@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 from copy import deepcopy
+from dataclasses import replace
 from typing import Any, AsyncIterator
 
 import pytest
@@ -24,8 +25,11 @@ from lantu.agent import (
 )
 from lantu.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from lantu.client import LLMClient
-from lantu.conversation import ConversationManager
+from lantu.conversation import ConversationManager, ToolResultBlock
+from lantu.context.repo_map import build_repo_map
+from lantu.memory.file_ledger import FileLedger
 from lantu.hooks import Action, Hook, HookEngine
+from lantu.memory.session import SessionManager
 from lantu.serialization import build_anthropic_messages
 from lantu.tools import create_default_registry
 from lantu.tools.base import (
@@ -252,6 +256,31 @@ async def test_system_prompt_is_stable_across_agent_runs():
 
 
 @pytest.mark.asyncio
+async def test_enabled_repo_map_is_part_of_stable_system_prompt(tmp_path):
+    (tmp_path / "app.py").write_text(
+        "def handle_request():\n    return None\n", encoding="utf-8"
+    )
+    client = MockLLMClient(
+        [[TextDelta("done"), StreamEnd("end_turn", input_tokens=5, output_tokens=2)]]
+    )
+    agent = Agent(
+        client,
+        create_default_registry(),
+        "anthropic",
+        work_dir=str(tmp_path),
+        repo_map=build_repo_map(tmp_path, max_tokens=200),
+    )
+    conversation = ConversationManager()
+    conversation.add_user_message("find the entrypoint")
+
+    async for _ in agent.run(conversation):
+        pass
+
+    assert "## Repository Map" in client.systems[0]
+    assert "app.py:1 function handle_request" in client.systems[0]
+
+
+@pytest.mark.asyncio
 async def test_run_to_completion_appends_hook_prompt_to_messages():
     client = MockLLMClient([
         [TextDelta("done"), StreamEnd("end_turn", input_tokens=5, output_tokens=2)],
@@ -322,6 +351,329 @@ async def test_run_to_completion_refreshes_tools_after_tool_search(tmp_path):
     assert result == "done"
     assert "DeferredTool" not in {tool["name"] for tool in client.tool_snapshots[0]}
     assert "DeferredTool" in {tool["name"] for tool in client.tool_snapshots[1]}
+
+
+@pytest.mark.asyncio
+async def test_tool_search_journal_state_survives_session_resume(tmp_path):
+    """A loaded deferred tool is journaled, restored, and executable after resume."""
+    class Params(BaseModel):
+        value: str = ""
+
+    class DeferredTool(Tool):
+        name = "DeferredTool"
+        description = "A deferred test tool"
+        params_model = Params
+        should_defer = True
+
+        async def execute(self, params: Params) -> ToolResult:
+            return ToolResult(output=f"deferred:{params.value}")
+
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.start_runtime("new")
+
+    client = MockLLMClient([
+        [
+            ToolCallComplete(
+                "search-1",
+                "ToolSearch",
+                {"query": "select:DeferredTool"},
+            ),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(DeferredTool())
+    from lantu.tools.impl.tool_search import ToolSearchTool
+
+    registry.register(ToolSearchTool(registry, protocol="anthropic"))
+    agent = Agent(
+        client,
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+
+    assert await agent.run_to_completion("load the deferred tool") == "done"
+    events = session.journal.read()
+    epoch_events = [
+        event for event in events if event.type == "tool.schema.epoch.changed"
+    ]
+    assert [event.payload["reason"] for event in epoch_events] == [
+        "initial",
+        "tool_loaded",
+    ]
+    model_epochs = [
+        event.payload["schema_epoch_id"]
+        for event in events
+        if event.type == "model.request.started"
+    ]
+    assert model_epochs == [
+        epoch_events[0].payload["epoch_id"],
+        epoch_events[1].payload["epoch_id"],
+    ]
+    session.stop_runtime("user_exit")
+    session.close()
+
+    resumed = manager.resume(session.session_id)
+    assert resumed is not None
+    assert [state["name"] for state in resumed.session.loaded_tool_states] == [
+        "DeferredTool"
+    ]
+
+    restored_registry = create_default_registry(work_dir=str(tmp_path))
+    restored_registry.register(DeferredTool())
+    restored_registry.register(ToolSearchTool(restored_registry, protocol="anthropic"))
+    restored_registry.restore_discovered(resumed.session.loaded_tool_states)
+    assert restored_registry.is_model_visible("DeferredTool")
+
+    resumed.session.start_runtime("resume")
+    restored_agent = Agent(
+        MockLLMClient([]),
+        restored_registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=resumed.session,
+    )
+    results = [
+        item
+        async for item in restored_agent._execute_tool(
+            ToolCallComplete("tool-1", "DeferredTool", {"value": "after-resume"})
+        )
+        if not isinstance(item, PermissionRequest)
+    ]
+    assert results[0][0].output == "deferred:after-resume"
+    resumed.session.close()
+
+
+@pytest.mark.asyncio
+async def test_file_tool_updates_ledger_and_journal(tmp_path):
+    target = tmp_path / "sample.py"
+    target.write_text("print('hello')\n", encoding="utf-8")
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.start_runtime("new")
+    client = MockLLMClient([
+        [
+            ToolCallComplete(
+                "read-1",
+                "ReadFile",
+                {"file_path": "sample.py", "offset": 0, "limit": 2000},
+            ),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    agent = Agent(
+        client,
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+
+    assert await agent.run_to_completion("read the file") == "done"
+    entry = session.file_ledger.get(target)
+    assert entry is not None
+    assert entry.operation == "read"
+    assert entry.line_count == 1
+    assert entry.content_hash
+    assert any(
+        event.type == "file.observed"
+        for event in session.journal.read()
+    )
+    session.close()
+
+
+def test_file_result_deduplicates_only_ranges_visible_in_context(tmp_path):
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.start_runtime("new")
+    agent = Agent(
+        MockLLMClient([]),
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+    path = tmp_path / "sample.py"
+    content = "\n".join(f"{i}\tline-{i}" for i in range(1, 201))
+    first = FileLedger.build_entry(
+        path, content, operation="read", limit=200, tool_call_id="read-1"
+    )
+    session.file_ledger.apply(first)
+
+    first_result = agent._prepare_tool_results(
+        [ToolResultBlock("read-1", content)]
+    )[0]
+    assert first_result.content == content
+
+    second = FileLedger.build_entry(
+        path, content, operation="read", limit=200, tool_call_id="read-2"
+    )
+    session.file_ledger.apply(second)
+    second_result = agent._prepare_tool_results(
+        [ToolResultBlock("read-2", content)]
+    )[0]
+    assert "already visible" in second_result.content
+    session.close()
+
+
+def test_large_file_result_marks_only_preview_lines_visible(tmp_path):
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.start_runtime("new")
+    agent = Agent(
+        MockLLMClient([]),
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+    path = tmp_path / "large.py"
+    content = "\n".join(f"{i}\t{'x' * 100}" for i in range(1, 1200))
+    first = FileLedger.build_entry(
+        path, content, operation="read", limit=1199, tool_call_id="read-big"
+    )
+    session.file_ledger.apply(first)
+    prepared = agent._prepare_tool_results(
+        [ToolResultBlock("read-big", content)]
+    )[0]
+    assert prepared.content.startswith("<persisted-output>")
+    assert not session.file_ledger.is_visible(path, first.content_hash, 1000, 1100)
+
+    # The hash must describe the complete current file, so use the same source
+    # version while changing only the requested range metadata.
+    middle = replace(
+        first,
+        offset=500,
+        limit=100,
+        tool_call_id="read-middle",
+    )
+    session.file_ledger.apply(middle)
+    middle_content = "\n".join(f"{i}\t{'x' * 100}" for i in range(501, 601))
+    middle_result = agent._prepare_tool_results(
+        [ToolResultBlock("read-middle", middle_content)]
+    )[0]
+    assert "already visible" not in middle_result.content
+    session.close()
+
+
+@pytest.mark.asyncio
+async def test_write_file_updates_ledger(tmp_path):
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.start_runtime("new")
+    agent = Agent(
+        MockLLMClient([]),
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+
+    results = [
+        item
+        async for item in agent._execute_tool(
+            ToolCallComplete(
+                "write-1",
+                "WriteFile",
+                {"file_path": "created.txt", "content": "created"},
+            )
+        )
+        if not isinstance(item, PermissionRequest)
+    ]
+
+    assert results[0][0].is_error is False
+    entry = session.file_ledger.get(tmp_path / "created.txt")
+    assert entry is not None
+    assert entry.operation == "write"
+    assert entry.size == len("created".encode("utf-8"))
+    assert any(event.type == "file.updated" for event in session.journal.read())
+    session.close()
+
+
+@pytest.mark.asyncio
+async def test_unloaded_deferred_tool_call_is_rejected(tmp_path):
+    class Params(BaseModel):
+        value: str = ""
+
+    class DeferredTool(Tool):
+        name = "DeferredTool"
+        description = "A deferred test tool"
+        params_model = Params
+        should_defer = True
+        executed = False
+
+        async def execute(self, params: Params) -> ToolResult:
+            self.executed = True
+            return ToolResult(output=params.value)
+
+    registry = create_default_registry(work_dir=str(tmp_path))
+    deferred = DeferredTool()
+    registry.register(deferred)
+    agent = Agent(
+        MockLLMClient([]),
+        registry,
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+
+    results = [
+        item
+        async for item in agent._execute_tool(
+            ToolCallComplete("call-1", "DeferredTool", {"value": "should not run"})
+        )
+        if not isinstance(item, PermissionRequest)
+    ]
+
+    result, _elapsed, is_unknown = results[0]
+    assert result.is_error
+    assert "Use ToolSearch" in result.output
+    assert not is_unknown
+    assert not deferred.executed
+
+
+@pytest.mark.asyncio
+async def test_deferred_tool_reminder_is_not_repeated_across_iterations(tmp_path):
+    class Params(BaseModel):
+        value: str = ""
+
+    class DeferredTool(Tool):
+        name = "DeferredTool"
+        description = "A deferred test tool"
+        params_model = Params
+        should_defer = True
+
+        async def execute(self, params: Params) -> ToolResult:
+            return ToolResult(output=params.value)
+
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    client = MockLLMClient([
+        [
+            ToolCallComplete(
+                "read-1",
+                "ReadFile",
+                {"file_path": "note.txt"},
+            ),
+            StreamEnd("end_turn", input_tokens=5, output_tokens=2),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=8, output_tokens=2)],
+    ])
+    registry = create_default_registry(work_dir=str(tmp_path))
+    registry.register(DeferredTool())
+    agent = Agent(client, registry, "anthropic", work_dir=str(tmp_path))
+
+    await agent.run_to_completion("read the note")
+
+    reminders = [
+        message
+        for message in client.message_snapshots[-1]
+        if message.reminder_key == "deferred_tools"
+    ]
+    assert len(reminders) == 1
 
 
 @pytest.mark.asyncio
@@ -557,7 +909,9 @@ async def test_noninteractive_tool_execution_records_journal_events(tmp_path):
 
     assert result == "done"
     tool_events = [
-        event for event in session.events if event.event_type.startswith("tool.")
+        event
+        for event in session.events
+        if event.event_type in {"tool.started", "tool.completed"}
     ]
     assert [event.event_type for event in tool_events] == [
         "tool.started",
@@ -617,6 +971,20 @@ async def test_run_records_model_usage_in_session():
         "cache_read_tokens": 3,
         "cache_creation_tokens": 2,
     }
+    model_events = [
+        event
+        for event in session.events
+        if event.event_type in {"model.request.started", "model.request.completed"}
+    ]
+    assert len(model_events) == 2
+    assert model_events[0].payload["schema_epoch_id"]
+    assert (
+        model_events[0].payload["schema_epoch_id"]
+        == model_events[1].payload["schema_epoch_id"]
+    )
+    assert [
+        event.event_type for event in session.events
+    ].count("tool.schema.epoch.changed") == 1
 
 
 @pytest.mark.asyncio
@@ -990,6 +1358,44 @@ def test_system_prompt_plan():
 def test_plan_mode_sparse_reminder():
     reminder = build_plan_mode_reminder("/tmp/plan.md", True, 8)
     assert "Plan mode still active" in reminder
+
+
+@pytest.mark.asyncio
+async def test_plan_mode_reminder_is_not_repeated_while_content_is_unchanged(tmp_path):
+    from lantu.permissions import PermissionMode
+
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    client = MockLLMClient([
+        [
+            ToolCallComplete("read-1", "ReadFile", {"file_path": "note.txt"}),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=5),
+        ],
+        [
+            ToolCallComplete("read-2", "ReadFile", {"file_path": "note.txt"}),
+            StreamEnd("end_turn", input_tokens=10, output_tokens=5),
+        ],
+        [TextDelta("done"), StreamEnd("end_turn", input_tokens=10, output_tokens=5)],
+    ])
+    agent = Agent(
+        client,
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+    )
+    agent.set_permission_mode(PermissionMode.PLAN)
+    conversation = ConversationManager()
+    conversation.add_user_message("inspect the project")
+
+    async for _event in agent.run(conversation):
+        pass
+
+    reminders = [
+        message
+        for message in conversation.history
+        if message.reminder_key == "plan_mode"
+    ]
+    assert len(reminders) == 1
+    assert reminders[0].reminder_hash
 
 def test_environment_context():
     ctx = build_environment_context("/home/user/project")

@@ -41,11 +41,12 @@ class ReadFile(Tool):
         resolved = str(path.resolve())
 
         try:
-            text = self._cache.get(resolved) if self._cache else None
+            mtime_ns = path.stat().st_mtime_ns
+            text = self._cache.get(resolved, mtime_ns) if self._cache else None
             if text is None:
                 text = path.read_text(encoding="utf-8")
                 if self._cache:
-                    self._cache.put(resolved, text)
+                    self._cache.put(resolved, text, mtime_ns)
         except Exception as e:
             return ToolResult(output=f"Error reading file: {e}", is_error=True)
 

@@ -18,6 +18,7 @@ from lantu.conversation import (
     ToolUseBlock,
 )
 from lantu.memory.journal import JournalEvent, SessionJournal
+from lantu.memory.file_ledger import FileLedger
 
 
 SESSIONS_DIR = ".lantu/sessions"
@@ -105,6 +106,9 @@ class Session:
         sessions_dir: Path,
         *,
         pending_runtime_id: str | None = None,
+        loaded_tool_states: list[dict[str, str]] | None = None,
+        file_ledger: FileLedger | None = None,
+        schema_epoch: dict[str, Any] | None = None,
     ) -> None:
         self.session_id = journal.session_id
         self.journal = journal
@@ -113,8 +117,15 @@ class Session:
         self.runtime_id: str | None = None
         self.turn_id: str | None = None
         self._pending_runtime_id = pending_runtime_id
+        self.loaded_tool_states = loaded_tool_states or []
+        self.file_ledger = file_ledger or FileLedger()
+        self.schema_epoch = dict(schema_epoch) if schema_epoch else None
         self._message_ids: dict[int, str] = {}
         self._closed = False
+
+    @property
+    def closed(self) -> bool:
+        return self.journal.closed
 
     def start_runtime(self, mode: str) -> str:
         if self.runtime_id is not None:
@@ -175,12 +186,15 @@ class Session:
     def record(self, event: ExecutionEvent) -> JournalEvent:
         if self.runtime_id is None:
             raise RuntimeError("execution events require an active runtime")
-        return self.journal.append(
+        journal_event = self.journal.append(
             event.event_type,
             event.payload,
             runtime_id=self.runtime_id,
             turn_id=self.turn_id,
         )
+        if event.event_type == "tool.schema.epoch.changed":
+            self.schema_epoch = dict(event.payload)
+        return journal_event
 
     def context_compacted(self, summary: str, keep: list[Message]) -> JournalEvent:
         if self.runtime_id is None or self.turn_id is None:
@@ -277,7 +291,7 @@ class SessionManager:
         )
         created_at = _parse_timestamp(event.timestamp)
         meta = SessionMeta(id=session_id, created_at=created_at, last_active=created_at)
-        session = Session(journal, meta, self._sessions_dir)
+        session = Session(journal, meta, self._sessions_dir, file_ledger=FileLedger())
         session._save_meta_cache()
         return session
 
@@ -318,6 +332,9 @@ class SessionManager:
                 meta,
                 self._sessions_dir,
                 pending_runtime_id=pending_runtime_id,
+                loaded_tool_states=_tool_schema_states(events),
+                file_ledger=_file_ledger_from_events(events),
+                schema_epoch=_schema_epoch_from_events(events),
             )
             session._register_projected_messages(projected)
             session._save_meta_cache()
@@ -347,7 +364,7 @@ def _generate_session_id() -> str:
 
 
 def _message_payload(message: Message, message_id: str) -> dict[str, Any]:
-    return {
+    payload = {
         "message_id": message_id,
         "role": message.role,
         "content": message.content,
@@ -372,6 +389,10 @@ def _message_payload(message: Message, message_id: str) -> dict[str, Any]:
             for item in message.thinking_blocks
         ],
     }
+    if message.reminder_key is not None:
+        payload["reminder_key"] = message.reminder_key
+        payload["reminder_hash"] = message.reminder_hash
+    return payload
 
 
 def _message_from_payload(payload: dict[str, Any]) -> Message:
@@ -404,6 +425,16 @@ def _message_from_payload(payload: dict[str, Any]) -> Message:
             for item in payload.get("thinking_blocks", [])
             if isinstance(item, dict)
         ],
+        reminder_key=(
+            str(payload["reminder_key"])
+            if payload.get("reminder_key") is not None
+            else None
+        ),
+        reminder_hash=(
+            str(payload["reminder_hash"])
+            if payload.get("reminder_hash") is not None
+            else None
+        ),
     )
 
 
@@ -475,6 +506,46 @@ def _meta_from_events(events: list[JournalEvent]) -> SessionMeta | None:
                 )
             )
     return meta
+
+
+def _tool_schema_states(events: list[JournalEvent]) -> list[dict[str, str]]:
+    """Replay deferred-tool Schema activation events in Journal order."""
+    states: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for event in events:
+        if event.type != "tool.schema.loaded":
+            continue
+        for raw_state in event.payload.get("tools", []):
+            if not isinstance(raw_state, dict):
+                continue
+            name = raw_state.get("name")
+            schema_hash = raw_state.get("schema_hash")
+            if not isinstance(name, str) or not isinstance(schema_hash, str):
+                continue
+            if name in seen:
+                continue
+            states.append({"name": name, "schema_hash": schema_hash})
+            seen.add(name)
+    return states
+
+
+def _file_ledger_from_events(events: list[JournalEvent]) -> FileLedger:
+    """Replay the latest file observation/update for each path."""
+    ledger = FileLedger()
+    for event in events:
+        if event.type not in {"file.observed", "file.updated"}:
+            continue
+        ledger.apply_payload(event.payload)
+    return ledger
+
+
+def _schema_epoch_from_events(events: list[JournalEvent]) -> dict[str, Any] | None:
+    """Return the latest tool-schema Epoch payload for Session resume."""
+    latest: dict[str, Any] | None = None
+    for event in events:
+        if event.type == "tool.schema.epoch.changed":
+            latest = dict(event.payload)
+    return latest
 
 
 def _append_interruption_events(
