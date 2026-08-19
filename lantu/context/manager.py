@@ -14,7 +14,6 @@ from lantu.conversation import (
     ToolResultBlock,
     estimate_tokens,
 )
-from lantu.serialization import build_messages
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -258,98 +257,67 @@ def should_auto_compact(last_input_tokens: int, context_window: int) -> bool:
     return last_input_tokens >= compute_compact_threshold(context_window)
 
 
-SUMMARY_PROMPT = """\
-CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
+COMPACTION_INSTRUCTION = """\
+Create a durable, technically precise summary of the conversation above. The older
+messages will be removed after compaction, so the summary must preserve every fact
+needed to continue the work without reopening the full transcript.
 
-- Do NOT use ReadFile, Bash, Grep, Glob, EditFile, WriteFile, or ANY other tool.
-- You already have all the context you need in the conversation above.
-- Tool calls will be REJECTED and will waste your only turn — you will fail the task.
-- Your entire response must be plain text: an <analysis> block followed by a <summary> block.
+Output rules:
+- Return only the final summary. Do not output analysis, reasoning, preamble, or
+  <analysis>/<summary> tags, and do not call tools.
+- Use exactly the Markdown structure below. Keep the headings and field labels, but
+  write field values in the main language of the conversation.
+- Record only facts established by the conversation. If a field has no known facts,
+  write "None". Never invent progress, decisions, causes, test results, or tasks.
+- Preserve exact technical identifiers where they matter: repository-relative file
+  paths, class/function/config names, commands, parameter values, thresholds, error
+  messages, commit IDs, and measured test results.
+- Distinguish confirmed facts from hypotheses or unresolved questions. Mark the
+  latter explicitly instead of presenting them as conclusions.
+- Summarize code rather than copying large snippets. Include a short exact snippet
+  only when its precise text is required to continue safely.
+- Do not reproduce the conversation chronologically, list every user message, or
+  infer a next action. Outstanding work must come only from explicit user requests
+  or work that was started but not completed.
+- Give extra weight to the user's corrections and rejected approaches so they are
+  not repeated after recovery.
 
-Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
-This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
+Required output structure:
 
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you've covered all necessary points. In your analysis process:
+## Long-term goal
+- Final objective: the user's durable end goal.
+- Current scope: how the summarized work contributes to that goal.
 
-1. Chronologically analyze each message and section of the conversation. For each section thoroughly identify:
-   - The user's explicit requests and intents
-   - Your approach to addressing the user's requests
-   - Key decisions, technical concepts and code patterns
-   - Specific details like:
-     - file names
-     - full code snippets
-     - function signatures
-     - file edits
-   - Errors that you ran into and how you fixed them
-   - Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
-2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.
+## Constraints and confirmed decisions
+- Requirements: explicit constraints, preferences, and acceptance criteria.
+- Confirmed decisions: agreed architecture, behavior, interfaces, and trade-offs.
+- Corrections and rejected approaches: user corrections and approaches that must not
+  be repeated, including why when known.
 
-After your analysis, output your final summary wrapped in <summary> tags. Your summary should include the following sections:
+## Completed work
+- Implementation: completed changes, with relevant files and symbols.
+- Verification: commands, tests, measurements, and their exact outcomes.
+- Established findings: conclusions confirmed by inspection or execution.
 
-1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail
-2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.
-3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.
-4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
-5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results. These are critical for understanding the users' feedback and changing intent.
-7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
-9. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.
-   If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.
+## Outstanding work
+- Explicit unfinished requests: requested work that is not complete.
+- In-progress state: partially completed work and its exact stopping state.
+- Blockers or unresolved questions: known obstacles, hypotheses, and missing evidence.
 
-Output structure:
+## Key files and code state
+- Files and symbols: each important path plus the role and current state of its key
+  classes, functions, configuration, or data structures.
+- Runtime and data state: relevant modes, environment, persisted state, sessions,
+  branches, commits, and uncommitted changes.
+- Critical values: exact settings, limits, commands, errors, or small code fragments
+  that must survive compaction.
 
-<analysis>
-[Your thought process, ensuring all points are covered thoroughly and accurately]
-</analysis>
-
-<summary>
-1. Primary Request and Intent:
-   [Detailed description]
-
-2. Key Technical Concepts:
-   - [Concept 1]
-   - [Concept 2]
-   - [...]
-
-3. Files and Code Sections:
-   - [File Name 1]
-      - [Summary of why this file is important]
-      - [Summary of the changes made to this file, if any]
-      - [Important Code Snippet]
-   - [File Name 2]
-      - [Important Code Snippet]
-   - [...]
-
-4. Errors and fixes:
-    - [Detailed description of error 1]:
-      - [How you fixed the error]
-      - [User feedback on the error if any]
-    - [...]
-
-5. Problem Solving:
-   [Description of solved problems and ongoing troubleshooting]
-
-6. All user messages:
-    - [Detailed non tool use user message]
-    - [...]
-
-7. Pending Tasks:
-   - [Task 1]
-   - [Task 2]
-   - [...]
-
-8. Current Work:
-   [Precise description of current work]
-
-9. Optional Next Step:
-   [Optional Next step to take]
-
-</summary>
-
-Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.
-
-REMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> block followed by a <summary> block. Tool calls will be rejected and you will fail the task."""
+## Historical problems and resolutions
+- Problem: observable symptom or error.
+- Confirmed cause: established root cause, or "Unconfirmed".
+- Resolution and evidence: applied fix and verification result, or current status if
+  unresolved.
+"""
 
 
 def extract_summary(llm_output: str) -> str:
@@ -703,6 +671,7 @@ async def auto_compact(
     tool_schemas: list[Mapping[str, Any]] | None = None,
     transcript_path: str = "",
     budget_messages: list[Message] | None = None,
+    system_prompt: str = "",
 ) -> CompactEvent | str | None:
     # 以真实 API 用量为锚点做阈值判断：current_tokens() 返回上次计费基准
     # （input + cache_read + cache_creation + output）加上锚点之后新增消息的
@@ -749,25 +718,13 @@ async def auto_compact(
     if keep_start <= 0 or _prefix_too_small_to_compact(to_summarize):
         return None
 
-    messages_for_summary = build_messages(list(to_summarize), protocol)
-
-    summary_messages: list[dict[str, Any]] = [
-        {"role": "user", "content": SUMMARY_PROMPT},
-    ]
-    summary_messages.extend(messages_for_summary)
-    summary_messages.append(
-        {"role": "user", "content": "Please provide your summary of the conversation above now. REMINDER: Do NOT call any tools — respond with plain text only."}
-    )
-
     summary_conv = ConversationManager()
-    summary_conv.history = [
-        Message(role="user", content=SUMMARY_PROMPT),
-    ]
     # 只摘要前缀；保留的尾部在下面重建时原样拼回。
-    for msg in to_summarize:
-        summary_conv.history.append(msg)
+    summary_conv.history = list(to_summarize)
+    # 使用原始 system/tools 和原始历史前缀，只在末尾追加压缩指令，
+    # 使摘要请求能够复用正常请求已经建立的前缀缓存。
     summary_conv.history.append(
-        Message(role="user", content="Please provide your summary of the conversation above now. REMINDER: Do NOT call any tools — respond with plain text only.")
+        Message(role="user", content=COMPACTION_INSTRUCTION)
     )
 
     max_retries = 3
@@ -778,7 +735,11 @@ async def auto_compact(
             from lantu.tools.base import StreamEnd, StreamEvent, TextDelta
 
             collected_text = ""
-            async for event in client.stream(summary_conv, system=SUMMARY_PROMPT, tools=tool_schemas):
+            async for event in client.stream(
+                summary_conv,
+                system=system_prompt,
+                tools=tool_schemas,
+            ):
                 if isinstance(event, TextDelta):
                     collected_text += event.text
                 elif isinstance(event, StreamEnd):
@@ -788,13 +749,12 @@ async def auto_compact(
 
         except Exception as e:
             err_msg = str(e).lower()
-            if "prompt" in err_msg and "long" in err_msg or "too many" in err_msg:
-                groups = _group_messages_by_turn(summary_conv.history[1:-1])
+            if ("prompt" in err_msg and "long" in err_msg) or "too many" in err_msg:
+                groups = _group_messages_by_turn(summary_conv.history[:-1])
                 drop_count = max(1, len(groups) // 5)
                 remaining = groups[drop_count:]
                 summary_conv.history = (
-                    [summary_conv.history[0]]
-                    + [m for g in remaining for m in g]
+                    [m for g in remaining for m in g]
                     + [summary_conv.history[-1]]
                 )
                 continue

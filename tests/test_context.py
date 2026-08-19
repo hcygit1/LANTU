@@ -8,6 +8,7 @@ import pytest
 
 from lantu.context.manager import (
     AGGREGATE_CHAR_LIMIT,
+    COMPACTION_INSTRUCTION,
     KEEP_MAX_TOKENS,
     KEEP_RECENT_TOKENS,
     MIN_KEEP_MESSAGES,
@@ -564,14 +565,33 @@ class _SummaryClient:
     def __init__(self, summary_body: str = "PREFIX SUMMARY") -> None:
         self.summary_body = summary_body
         self.summarized_history: list[Message] | None = None
+        self.system: str | None = None
+        self.tools = None
 
     async def stream(self, conversation, system="", tools=None):
         from lantu.tools.base import StreamEnd, TextDelta
 
-        # 快照记录交给摘要器的内容（不含编排器额外添加的开头 prompt
-        # 以及结尾的"请生成摘要"指令）。
+        # 快照记录摘要请求的完整消息，以及复用的 system/tools 前缀。
         self.summarized_history = list(conversation.history)
-        yield TextDelta(text=f"<summary>{self.summary_body}</summary>")
+        self.system = system
+        self.tools = tools
+        yield TextDelta(text=self.summary_body)
+        yield StreamEnd(stop_reason="end_turn", input_tokens=10, output_tokens=10)
+
+
+class _RetrySummaryClient:
+    def __init__(self) -> None:
+        self.histories: list[list[Message]] = []
+        self.systems: list[str] = []
+
+    async def stream(self, conversation, system="", tools=None):
+        from lantu.tools.base import StreamEnd, TextDelta
+
+        self.histories.append(list(conversation.history))
+        self.systems.append(system)
+        if len(self.histories) == 1:
+            raise ValueError("prompt too long")
+        yield TextDelta(text="RETRIED SUMMARY")
         yield StreamEnd(stop_reason="end_turn", input_tokens=10, output_tokens=10)
 
 
@@ -591,6 +611,81 @@ def _make_long_conversation(n_tail: int = 6, tail_tokens: int = 4000) -> Convers
 
 @pytest.mark.asyncio
 class TestAutoCompactKeepRecent:
+    async def test_summary_request_reuses_prefix_and_appends_instruction(
+        self, tmp_path: Path
+    ) -> None:
+        conv = _make_long_conversation()
+        keep_start = _compute_keep_start_index(conv.history)
+        summarized_before = list(conv.history[:keep_start])
+        client = _SummaryClient()
+        tools = [{"name": "ReadFile"}]
+        conv.record_usage_anchor(input_tokens=200_000)
+
+        await auto_compact(
+            conv,
+            client,
+            context_window=200_000,
+            session_dir=tmp_path,
+            system_prompt="ORIGINAL SYSTEM",
+            tool_schemas=tools,
+        )
+
+        assert client.system == "ORIGINAL SYSTEM"
+        assert client.tools is tools
+        assert client.summarized_history is not None
+        assert client.summarized_history[:-1] == summarized_before
+        assert client.summarized_history[-1] == Message(
+            role="user", content=COMPACTION_INSTRUCTION
+        )
+
+    async def test_compaction_instruction_has_fixed_durable_sections(self) -> None:
+        expected_sections = [
+            "## Long-term goal",
+            "## Constraints and confirmed decisions",
+            "## Completed work",
+            "## Outstanding work",
+            "## Key files and code state",
+            "## Historical problems and resolutions",
+        ]
+
+        for section in expected_sections:
+            assert section in COMPACTION_INSTRUCTION
+        assert "## Next step" not in COMPACTION_INSTRUCTION
+        assert "## Continuation point" not in COMPACTION_INSTRUCTION
+        assert "<analysis>/<summary> tags" in COMPACTION_INSTRUCTION
+        assert "repository-relative file" in COMPACTION_INSTRUCTION
+        assert "Corrections and rejected approaches" in COMPACTION_INSTRUCTION
+        assert "commands, tests, measurements" in COMPACTION_INSTRUCTION
+        assert "Explicit unfinished requests" in COMPACTION_INSTRUCTION
+        assert "Never invent progress" in COMPACTION_INSTRUCTION
+        assert "infer a next action" in COMPACTION_INSTRUCTION
+
+    async def test_prompt_too_long_retry_keeps_trailing_instruction(
+        self, tmp_path: Path
+    ) -> None:
+        conv = _make_long_conversation()
+        client = _RetrySummaryClient()
+        conv.record_usage_anchor(input_tokens=200_000)
+
+        result = await auto_compact(
+            conv,
+            client,
+            context_window=200_000,
+            session_dir=tmp_path,
+            system_prompt="ORIGINAL SYSTEM",
+        )
+
+        from lantu.context.manager import CompactEvent
+
+        assert isinstance(result, CompactEvent)
+        assert len(client.histories) == 2
+        assert len(client.histories[1]) < len(client.histories[0])
+        assert all(
+            history[-1] == Message(role="user", content=COMPACTION_INSTRUCTION)
+            for history in client.histories
+        )
+        assert client.systems == ["ORIGINAL SYSTEM", "ORIGINAL SYSTEM"]
+
     async def test_recent_messages_kept_verbatim(self, tmp_path: Path) -> None:
         conv = _make_long_conversation()
         # 快照记录保留窗口选中了哪些尾部消息，让断言跟随算法本身，

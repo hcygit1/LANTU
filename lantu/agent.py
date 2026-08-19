@@ -597,7 +597,8 @@ class Agent:
                 protocol=self.protocol,
                 breaker=self.compact_breaker,
                 recovery=self.recovery_state,
-                tool_schemas=self.registry.get_all_schemas(self.protocol),
+                system_prompt=system,
+                tool_schemas=tools,
                 transcript_path=self._transcript_path,
             )
             if isinstance(compact_result, CompactEvent):
@@ -1440,6 +1441,7 @@ class Agent:
             manual=True,
             breaker=self.compact_breaker,
             recovery=self.recovery_state,
+            system_prompt=self._get_system_prompt(),
             tool_schemas=self.registry.get_all_schemas(self.protocol),
             transcript_path=self._transcript_path,
         )

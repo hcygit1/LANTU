@@ -27,7 +27,7 @@ if str(ROOT) not in sys.path:
 
 from lantu.agent import Agent, CompactNotification, ErrorEvent, LoopComplete
 from lantu.client import LLMClient
-from lantu.context.manager import SUMMARY_PROMPT
+from lantu.context.manager import COMPACTION_INSTRUCTION
 from lantu.conversation import ConversationManager, Message
 from lantu.memory.file_ledger import FileLedger
 from lantu.tools import create_default_registry
@@ -119,7 +119,12 @@ class ScriptedClient(LLMClient):
                 break
             common += 1
         self._previous_payload = payload
-        kind = "summary" if system == SUMMARY_PROMPT else "model"
+        kind = (
+            "summary"
+            if conversation.history
+            and conversation.history[-1].content == COMPACTION_INSTRUCTION
+            else "model"
+        )
         self.requests.append(
             RequestRecord(
                 kind=kind,
@@ -132,8 +137,12 @@ class ScriptedClient(LLMClient):
 
         if kind == "summary":
             yield TextDelta(
-                "<summary>Offline benchmark summary: preserve the user's goal, "
-                "recent tool results, and the current Lantu architecture.</summary>"
+                "## Long-term goal\nPreserve the user's goal.\n\n"
+                "## Constraints and confirmed decisions\nNone\n\n"
+                "## Completed work\nNone\n\n"
+                "## Outstanding work\nNone\n\n"
+                "## Key files and code state\nPreserve the current Lantu architecture.\n\n"
+                "## Historical problems and resolutions\nNone"
             )
             yield StreamEnd("end_turn", input_tokens=1, output_tokens=20)
             return
