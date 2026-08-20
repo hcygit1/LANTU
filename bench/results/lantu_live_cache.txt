@@ -1,0 +1,15 @@
+LANTU live cache validation
+model: glm-5.2
+mode: standard
+turns per run: 12
+runs: 3
+
+run | requests | prompt tokens | cached tokens | overall hit | warm hit | errors
+--- | ---: | ---: | ---: | ---: | ---: | ---:
+1 | 47 | 1621804 | 1558912 | 96.1% | 96.4% | 0
+2 | 69 | 1860631 | 1811072 | 97.3% | 97.4% | 0
+3 | 32 | 704824 | 665600 | 94.4% | 94.6% | 0
+
+mean overall hit: 96.0%
+mean warm hit: 96.1%
+total errors: 0

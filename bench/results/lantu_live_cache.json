@@ -1,0 +1,1756 @@
+{
+  "meta": {
+    "network": true,
+    "usage_source": "provider usage.recorded cache_read_tokens",
+    "token_estimator": "provider reported tokens",
+    "note": "Warm rate excludes the first model request of each run; provider cache may persist across sessions."
+  },
+  "config": {
+    "model": "glm-5.2",
+    "mode": "standard",
+    "repo_map": false,
+    "turns": 12,
+    "runs": 3,
+    "reasoning_effort": "low",
+    "max_output_tokens": 2048
+  },
+  "runs": [
+    {
+      "session_id": "session_20260818_200037_vt0n",
+      "model": "glm-5.2",
+      "mode": "standard",
+      "repo_map": false,
+      "reasoning_effort": "low",
+      "turns": 12,
+      "elapsed_seconds": 249.533,
+      "tool_calls": {
+        "Glob": 1,
+        "ReadFile": 25,
+        "Grep": 9
+      },
+      "errors": [],
+      "model_requests": 47,
+      "prompt_tokens": 1621804,
+      "cached_tokens": 1558912,
+      "uncached_tokens": 62892,
+      "output_tokens": 10433,
+      "overall_cache_hit_rate": 0.9612,
+      "warm_cache_hit_rate": 0.9644,
+      "turn_details": [
+        {
+          "turn": 1,
+          "elapsed_seconds": 8.423,
+          "tool_calls": [
+            "Glob",
+            "ReadFile"
+          ],
+          "answer_chars": 373,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 5351,
+              "output_tokens": 29,
+              "cache_read_tokens": 0,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2066,
+              "output_tokens": 18,
+              "cache_read_tokens": 5120,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 6652,
+              "output_tokens": 161,
+              "cache_read_tokens": 7168,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 2,
+          "elapsed_seconds": 20.028,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "Grep",
+            "Grep",
+            "Grep",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1141,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 302,
+              "output_tokens": 23,
+              "cache_read_tokens": 13696,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 990,
+              "output_tokens": 37,
+              "cache_read_tokens": 13952,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 139,
+              "output_tokens": 31,
+              "cache_read_tokens": 14848,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 50,
+              "output_tokens": 23,
+              "cache_read_tokens": 14976,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 209,
+              "output_tokens": 22,
+              "cache_read_tokens": 14848,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 111,
+              "output_tokens": 72,
+              "cache_read_tokens": 14976,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2642,
+              "output_tokens": 29,
+              "cache_read_tokens": 14976,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2073,
+              "output_tokens": 477,
+              "cache_read_tokens": 17536,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 3,
+          "elapsed_seconds": 10.243,
+          "tool_calls": [
+            "ReadFile"
+          ],
+          "answer_chars": 1043,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 517,
+              "output_tokens": 28,
+              "cache_read_tokens": 19584,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2252,
+              "output_tokens": 427,
+              "cache_read_tokens": 20096,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 4,
+          "elapsed_seconds": 11.881,
+          "tool_calls": [
+            "ReadFile"
+          ],
+          "answer_chars": 497,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 520,
+              "output_tokens": 240,
+              "cache_read_tokens": 22272,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 271,
+              "output_tokens": 215,
+              "cache_read_tokens": 22784,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 5,
+          "elapsed_seconds": 10.719,
+          "tool_calls": [
+            "ReadFile"
+          ],
+          "answer_chars": 1060,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 243,
+              "output_tokens": 19,
+              "cache_read_tokens": 23040,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 3198,
+              "output_tokens": 460,
+              "cache_read_tokens": 23168,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 6,
+          "elapsed_seconds": 14.89,
+          "tool_calls": [
+            "ReadFile"
+          ],
+          "answer_chars": 1267,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 603,
+              "output_tokens": 19,
+              "cache_read_tokens": 26240,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2049,
+              "output_tokens": 601,
+              "cache_read_tokens": 26624,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 7,
+          "elapsed_seconds": 20.427,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "Grep",
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 1126,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 618,
+              "output_tokens": 33,
+              "cache_read_tokens": 28672,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 272,
+              "output_tokens": 30,
+              "cache_read_tokens": 29184,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1022,
+              "output_tokens": 61,
+              "cache_read_tokens": 29440,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 195,
+              "output_tokens": 31,
+              "cache_read_tokens": 30336,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 106,
+              "output_tokens": 58,
+              "cache_read_tokens": 30464,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1700,
+              "output_tokens": 526,
+              "cache_read_tokens": 30464,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 8,
+          "elapsed_seconds": 21.958,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 2029,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 577,
+              "output_tokens": 18,
+              "cache_read_tokens": 32128,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2363,
+              "output_tokens": 51,
+              "cache_read_tokens": 32640,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 6233,
+              "output_tokens": 836,
+              "cache_read_tokens": 34944,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 9,
+          "elapsed_seconds": 45.928,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 2157,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 941,
+              "output_tokens": 108,
+              "cache_read_tokens": 41088,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 810,
+              "output_tokens": 30,
+              "cache_read_tokens": 41984,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1721,
+              "output_tokens": 99,
+              "cache_read_tokens": 42752,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 729,
+              "output_tokens": 87,
+              "cache_read_tokens": 44416,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 462,
+              "output_tokens": 296,
+              "cache_read_tokens": 45056,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 665,
+              "output_tokens": 874,
+              "cache_read_tokens": 45440,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 10,
+          "elapsed_seconds": 28.761,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 2977,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 914,
+              "output_tokens": 31,
+              "cache_read_tokens": 46080,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 3622,
+              "output_tokens": 31,
+              "cache_read_tokens": 46976,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2415,
+              "output_tokens": 31,
+              "cache_read_tokens": 50560,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 909,
+              "output_tokens": 78,
+              "cache_read_tokens": 52864,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 432,
+              "output_tokens": 1279,
+              "cache_read_tokens": 53760,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 11,
+          "elapsed_seconds": 27.648,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 969,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1348,
+              "output_tokens": 138,
+              "cache_read_tokens": 54144,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 229,
+              "output_tokens": 31,
+              "cache_read_tokens": 55424,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 155,
+              "output_tokens": 1549,
+              "cache_read_tokens": 55552,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 12,
+          "elapsed_seconds": 28.627,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 2558,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1590,
+              "output_tokens": 52,
+              "cache_read_tokens": 55680,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 406,
+              "output_tokens": 30,
+              "cache_read_tokens": 57216,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1035,
+              "output_tokens": 65,
+              "cache_read_tokens": 57600,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 945,
+              "output_tokens": 49,
+              "cache_read_tokens": 58624,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 240,
+              "output_tokens": 1000,
+              "cache_read_tokens": 59520,
+              "cache_creation_tokens": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "session_id": "session_20260818_200449_6adw",
+      "model": "glm-5.2",
+      "mode": "standard",
+      "repo_map": false,
+      "reasoning_effort": "low",
+      "turns": 12,
+      "elapsed_seconds": 272.034,
+      "tool_calls": {
+        "Grep": 18,
+        "ReadFile": 41
+      },
+      "errors": [],
+      "model_requests": 69,
+      "prompt_tokens": 1860631,
+      "cached_tokens": 1811072,
+      "uncached_tokens": 49559,
+      "output_tokens": 9848,
+      "overall_cache_hit_rate": 0.9734,
+      "warm_cache_hit_rate": 0.9739,
+      "turn_details": [
+        {
+          "turn": 1,
+          "elapsed_seconds": 12.174,
+          "tool_calls": [
+            "Grep",
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "Grep"
+          ],
+          "answer_chars": 708,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1195,
+              "output_tokens": 73,
+              "cache_read_tokens": 4352,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 719,
+              "output_tokens": 56,
+              "cache_read_tokens": 5376,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 742,
+              "output_tokens": 82,
+              "cache_read_tokens": 5888,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 737,
+              "output_tokens": 39,
+              "cache_read_tokens": 6528,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 166,
+              "output_tokens": 180,
+              "cache_read_tokens": 7168,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 2,
+          "elapsed_seconds": 19.628,
+          "tool_calls": [
+            "Grep",
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 1150,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 363,
+              "output_tokens": 93,
+              "cache_read_tokens": 7168,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1807,
+              "output_tokens": 30,
+              "cache_read_tokens": 7424,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 976,
+              "output_tokens": 30,
+              "cache_read_tokens": 9216,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 930,
+              "output_tokens": 46,
+              "cache_read_tokens": 10112,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 367,
+              "output_tokens": 65,
+              "cache_read_tokens": 11008,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 193,
+              "output_tokens": 30,
+              "cache_read_tokens": 11264,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 792,
+              "output_tokens": 401,
+              "cache_read_tokens": 11264,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 3,
+          "elapsed_seconds": 13.506,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 873,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 440,
+              "output_tokens": 50,
+              "cache_read_tokens": 12032,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1172,
+              "output_tokens": 32,
+              "cache_read_tokens": 12416,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 102,
+              "output_tokens": 29,
+              "cache_read_tokens": 13568,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1068,
+              "output_tokens": 29,
+              "cache_read_tokens": 13568,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 638,
+              "output_tokens": 350,
+              "cache_read_tokens": 14592,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 4,
+          "elapsed_seconds": 12.284,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 650,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 493,
+              "output_tokens": 99,
+              "cache_read_tokens": 15104,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 891,
+              "output_tokens": 34,
+              "cache_read_tokens": 15360,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 310,
+              "output_tokens": 30,
+              "cache_read_tokens": 16128,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 401,
+              "output_tokens": 283,
+              "cache_read_tokens": 16384,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 5,
+          "elapsed_seconds": 18.656,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1158,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 314,
+              "output_tokens": 31,
+              "cache_read_tokens": 16768,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1839,
+              "output_tokens": 40,
+              "cache_read_tokens": 17024,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 643,
+              "output_tokens": 31,
+              "cache_read_tokens": 18688,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 584,
+              "output_tokens": 31,
+              "cache_read_tokens": 19328,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 588,
+              "output_tokens": 17,
+              "cache_read_tokens": 19712,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 886,
+              "output_tokens": 468,
+              "cache_read_tokens": 20224,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 6,
+          "elapsed_seconds": 11.473,
+          "tool_calls": [
+            "ReadFile"
+          ],
+          "answer_chars": 1012,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 603,
+              "output_tokens": 28,
+              "cache_read_tokens": 20992,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1930,
+              "output_tokens": 447,
+              "cache_read_tokens": 21504,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 7,
+          "elapsed_seconds": 15.287,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 959,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 600,
+              "output_tokens": 93,
+              "cache_read_tokens": 23296,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 635,
+              "output_tokens": 30,
+              "cache_read_tokens": 23808,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 967,
+              "output_tokens": 30,
+              "cache_read_tokens": 24320,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 389,
+              "output_tokens": 436,
+              "cache_read_tokens": 25088,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 8,
+          "elapsed_seconds": 26.699,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile",
+            "Grep",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1396,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 584,
+              "output_tokens": 18,
+              "cache_read_tokens": 25344,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2370,
+              "output_tokens": 55,
+              "cache_read_tokens": 25856,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 735,
+              "output_tokens": 30,
+              "cache_read_tokens": 28160,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 862,
+              "output_tokens": 41,
+              "cache_read_tokens": 28672,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 159,
+              "output_tokens": 29,
+              "cache_read_tokens": 29440,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 609,
+              "output_tokens": 30,
+              "cache_read_tokens": 29440,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 530,
+              "output_tokens": 611,
+              "cache_read_tokens": 29952,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 9,
+          "elapsed_seconds": 21.127,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1532,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 645,
+              "output_tokens": 47,
+              "cache_read_tokens": 30464,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 403,
+              "output_tokens": 30,
+              "cache_read_tokens": 30976,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 837,
+              "output_tokens": 30,
+              "cache_read_tokens": 31232,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 503,
+              "output_tokens": 30,
+              "cache_read_tokens": 32000,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 451,
+              "output_tokens": 717,
+              "cache_read_tokens": 32384,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 10,
+          "elapsed_seconds": 45.203,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 2598,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 799,
+              "output_tokens": 41,
+              "cache_read_tokens": 32768,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 569,
+              "output_tokens": 31,
+              "cache_read_tokens": 33536,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 691,
+              "output_tokens": 31,
+              "cache_read_tokens": 34048,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1407,
+              "output_tokens": 31,
+              "cache_read_tokens": 34688,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1165,
+              "output_tokens": 31,
+              "cache_read_tokens": 35968,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 809,
+              "output_tokens": 36,
+              "cache_read_tokens": 37120,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 111,
+              "output_tokens": 31,
+              "cache_read_tokens": 37888,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 926,
+              "output_tokens": 31,
+              "cache_read_tokens": 37888,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1022,
+              "output_tokens": 42,
+              "cache_read_tokens": 38784,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 563,
+              "output_tokens": 1199,
+              "cache_read_tokens": 39680,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 11,
+          "elapsed_seconds": 38.583,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1886,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1271,
+              "output_tokens": 62,
+              "cache_read_tokens": 40192,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 953,
+              "output_tokens": 31,
+              "cache_read_tokens": 41344,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 111,
+              "output_tokens": 375,
+              "cache_read_tokens": 42240,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 509,
+              "output_tokens": 1339,
+              "cache_read_tokens": 42240,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 12,
+          "elapsed_seconds": 37.414,
+          "tool_calls": [
+            "Grep",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "Grep",
+            "Grep",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 2104,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1479,
+              "output_tokens": 44,
+              "cache_read_tokens": 42624,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 378,
+              "output_tokens": 30,
+              "cache_read_tokens": 44032,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 585,
+              "output_tokens": 30,
+              "cache_read_tokens": 44288,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 726,
+              "output_tokens": 43,
+              "cache_read_tokens": 44800,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 492,
+              "output_tokens": 30,
+              "cache_read_tokens": 45440,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 312,
+              "output_tokens": 47,
+              "cache_read_tokens": 45824,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 173,
+              "output_tokens": 34,
+              "cache_read_tokens": 46080,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 108,
+              "output_tokens": 30,
+              "cache_read_tokens": 46208,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 393,
+              "output_tokens": 30,
+              "cache_read_tokens": 46208,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 839,
+              "output_tokens": 808,
+              "cache_read_tokens": 46592,
+              "cache_creation_tokens": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "session_id": "session_20260818_200925_2tye",
+      "model": "glm-5.2",
+      "mode": "standard",
+      "repo_map": false,
+      "reasoning_effort": "low",
+      "turns": 12,
+      "elapsed_seconds": 132.499,
+      "tool_calls": {
+        "Grep": 5,
+        "Glob": 2,
+        "ReadFile": 23
+      },
+      "errors": [],
+      "model_requests": 32,
+      "prompt_tokens": 704824,
+      "cached_tokens": 665600,
+      "uncached_tokens": 39224,
+      "output_tokens": 5861,
+      "overall_cache_hit_rate": 0.9443,
+      "warm_cache_hit_rate": 0.9456,
+      "turn_details": [
+        {
+          "turn": 1,
+          "elapsed_seconds": 8.459,
+          "tool_calls": [
+            "Grep",
+            "Glob",
+            "Glob",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 514,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1195,
+              "output_tokens": 104,
+              "cache_read_tokens": 4352,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 890,
+              "output_tokens": 72,
+              "cache_read_tokens": 5376,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2044,
+              "output_tokens": 167,
+              "cache_read_tokens": 6144,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 2,
+          "elapsed_seconds": 10.079,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 465,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 436,
+              "output_tokens": 36,
+              "cache_read_tokens": 7936,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 743,
+              "output_tokens": 39,
+              "cache_read_tokens": 8192,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1860,
+              "output_tokens": 37,
+              "cache_read_tokens": 8704,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2010,
+              "output_tokens": 267,
+              "cache_read_tokens": 10496,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 3,
+          "elapsed_seconds": 10.04,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 736,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 500,
+              "output_tokens": 94,
+              "cache_read_tokens": 12288,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1403,
+              "output_tokens": 36,
+              "cache_read_tokens": 12672,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 962,
+              "output_tokens": 300,
+              "cache_read_tokens": 13824,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 4,
+          "elapsed_seconds": 6.29,
+          "tool_calls": [],
+          "answer_chars": 561,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 511,
+              "output_tokens": 286,
+              "cache_read_tokens": 14592,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 5,
+          "elapsed_seconds": 9.963,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 661,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 427,
+              "output_tokens": 52,
+              "cache_read_tokens": 14976,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1845,
+              "output_tokens": 40,
+              "cache_read_tokens": 15360,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1188,
+              "output_tokens": 304,
+              "cache_read_tokens": 17152,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 6,
+          "elapsed_seconds": 10.838,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1034,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 485,
+              "output_tokens": 72,
+              "cache_read_tokens": 18176,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2437,
+              "output_tokens": 473,
+              "cache_read_tokens": 18432,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 7,
+          "elapsed_seconds": 13.01,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 822,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 622,
+              "output_tokens": 89,
+              "cache_read_tokens": 20736,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1582,
+              "output_tokens": 38,
+              "cache_read_tokens": 21248,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1301,
+              "output_tokens": 363,
+              "cache_read_tokens": 22784,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 8,
+          "elapsed_seconds": 10.59,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 997,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 399,
+              "output_tokens": 68,
+              "cache_read_tokens": 24064,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2897,
+              "output_tokens": 396,
+              "cache_read_tokens": 24320,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 9,
+          "elapsed_seconds": 15.206,
+          "tool_calls": [
+            "ReadFile",
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 1320,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 493,
+              "output_tokens": 93,
+              "cache_read_tokens": 27136,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1290,
+              "output_tokens": 37,
+              "cache_read_tokens": 27392,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1152,
+              "output_tokens": 533,
+              "cache_read_tokens": 28672,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 10,
+          "elapsed_seconds": 18.011,
+          "tool_calls": [
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile",
+            "ReadFile"
+          ],
+          "answer_chars": 1711,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 676,
+              "output_tokens": 82,
+              "cache_read_tokens": 29696,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2958,
+              "output_tokens": 74,
+              "cache_read_tokens": 30208,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 2365,
+              "output_tokens": 38,
+              "cache_read_tokens": 33152,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1791,
+              "output_tokens": 674,
+              "cache_read_tokens": 35456,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 11,
+          "elapsed_seconds": 8.287,
+          "tool_calls": [],
+          "answer_chars": 924,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 822,
+              "output_tokens": 476,
+              "cache_read_tokens": 37120,
+              "cache_creation_tokens": 0
+            }
+          ]
+        },
+        {
+          "turn": 12,
+          "elapsed_seconds": 11.726,
+          "tool_calls": [
+            "Grep",
+            "ReadFile"
+          ],
+          "answer_chars": 1164,
+          "errors": [],
+          "usage": [
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 544,
+              "output_tokens": 70,
+              "cache_read_tokens": 37888,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 351,
+              "output_tokens": 37,
+              "cache_read_tokens": 38400,
+              "cache_creation_tokens": 0
+            },
+            {
+              "provider": "openai-compat",
+              "model": "glm-5.2",
+              "input_tokens": 1045,
+              "output_tokens": 414,
+              "cache_read_tokens": 38656,
+              "cache_creation_tokens": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
