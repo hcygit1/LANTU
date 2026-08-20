@@ -10,6 +10,7 @@ from evals.harbor.install import (
     proxy_env,
 )
 from evals.harbor.parser import build_task_instruction, parse_metrics
+from evals.harbor.settings import resolve_reasoning_effort
 
 
 def test_parse_metrics_prefers_final_result(tmp_path: Path) -> None:
@@ -49,6 +50,21 @@ def test_build_task_instruction_adds_completion_boundary() -> None:
     assert "Complete only the requested task." in prompt
     assert "stop immediately" in prompt
     assert "Do not add extra tests" in prompt
+
+
+def test_resolve_reasoning_effort_defaults_to_low() -> None:
+    assert resolve_reasoning_effort(None) == "low"
+    assert resolve_reasoning_effort("") == "low"
+
+
+def test_resolve_reasoning_effort_accepts_valid_values() -> None:
+    assert resolve_reasoning_effort(" HIGH ") == "high"
+    assert resolve_reasoning_effort("medium") == "medium"
+
+
+def test_resolve_reasoning_effort_rejects_unknown_value() -> None:
+    with pytest.raises(ValueError, match="LANTU_REASONING_EFFORT"):
+        resolve_reasoning_effort("extreme")
 
 
 def test_container_proxy_translates_host_loopback() -> None:

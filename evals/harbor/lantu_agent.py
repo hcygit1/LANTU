@@ -31,6 +31,7 @@ from .install import (
     proxy_env,
 )
 from .parser import build_task_instruction, parse_metrics
+from .settings import resolve_reasoning_effort
 
 
 LANTU_REPOSITORY = "https://github.com/hcygit1/LANTU.git"
@@ -116,6 +117,9 @@ class LantuAgent(BaseInstalledAgent):
         stderr_path = f"/logs/agent/{self._STDERR_FILENAME}"
         config_home = "/tmp/lantu-home"
         config_path = f"{config_home}/.lantu/config.yaml"
+        reasoning_effort = resolve_reasoning_effort(
+            self._get_env("LANTU_REASONING_EFFORT")
+        )
         config = {
             "providers": [
                 {
@@ -124,7 +128,7 @@ class LantuAgent(BaseInstalledAgent):
                     "base_url": base_url,
                     "model": model,
                     "api_key": "${LANTU_API_KEY}",
-                    "reasoning_effort": "low",
+                    "reasoning_effort": reasoning_effort,
                     "max_output_tokens": 32000,
                 }
             ],

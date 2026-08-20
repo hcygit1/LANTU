@@ -10,6 +10,8 @@ through the environment:
 export OPENAI_API_KEY="$DASHSCOPE_API_KEY"
 export OPENAI_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"
 export PYTHONUTF8=1
+# Optional. Defaults to low; use high for complex debugging or security tasks.
+export LANTU_REASONING_EFFORT=high
 # Optional. Loopback addresses are translated for Docker automatically.
 export LANTU_INSTALL_PROXY="http://127.0.0.1:7897"
 
