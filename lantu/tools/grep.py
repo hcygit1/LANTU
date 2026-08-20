@@ -8,6 +8,20 @@ from pydantic import BaseModel, Field
 from lantu.tools.base import SKIP_DIRS, Tool, ToolResult
 
 
+GREP_CONTEXT_CHARS = 200
+
+
+def _format_match(line: str, match: re.Match[str]) -> str:
+    """Return a bounded window around the first match in a long line."""
+    if len(line) <= 2 * GREP_CONTEXT_CHARS + 1:
+        return line
+    start = max(0, match.start() - GREP_CONTEXT_CHARS)
+    end = min(len(line), match.end() + GREP_CONTEXT_CHARS)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(line) else ""
+    return f"{prefix}{line[start:end]}{suffix}"
+
+
 class Params(BaseModel):
     pattern: str = Field(description="Regex pattern to search for")
     path: str = Field(default=".", description="Base directory to search from")
@@ -47,9 +61,12 @@ class Grep(Tool):
             except (OSError, UnicodeDecodeError):
                 continue
             for line_num, line in enumerate(text.splitlines(), 1):
-                if regex.search(line):
+                match = regex.search(line)
+                if match:
                     rel = file_path.relative_to(base).as_posix()
-                    results.append(f"{rel}:{line_num}:{line}")
+                    results.append(
+                        f"{rel}:{line_num}:{_format_match(line, match)}"
+                    )
 
         if not results:
             return ToolResult(output="No matches found.")

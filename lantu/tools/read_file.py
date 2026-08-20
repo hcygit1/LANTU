@@ -12,6 +12,16 @@ if TYPE_CHECKING:
     from lantu.tools.file_state_cache import FileStateCache
 
 
+READ_MAX_LINE_LENGTH = 2_000
+READ_TRUNCATED_LINE_MARKER = "(line truncated to 2000 chars; use Grep to search this line)"
+
+
+def _truncate_line(line: str) -> str:
+    if len(line) <= READ_MAX_LINE_LENGTH:
+        return line
+    return f"{line[:READ_MAX_LINE_LENGTH]}... {READ_TRUNCATED_LINE_MARKER}"
+
+
 class Params(BaseModel):
     file_path: str = Field(description="Absolute or relative path to the file to read")
     offset: int = Field(default=0, description="Line offset to start reading from (0-based)")
@@ -59,5 +69,8 @@ class ReadFile(Tool):
 
         lines = text.splitlines()
         selected = lines[params.offset : params.offset + params.limit]
-        numbered = [f"{i + params.offset + 1}\t{line}" for i, line in enumerate(selected)]
+        numbered = [
+            f"{i + params.offset + 1}\t{_truncate_line(line)}"
+            for i, line in enumerate(selected)
+        ]
         return ToolResult(output="\n".join(numbered))
