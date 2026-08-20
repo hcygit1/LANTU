@@ -521,7 +521,7 @@ def test_file_result_deduplicates_only_ranges_visible_in_context(tmp_path):
     session.close()
 
 
-def test_large_file_result_marks_only_preview_lines_visible(tmp_path):
+def test_large_file_result_marks_head_and_tail_preview_ranges_visible(tmp_path):
     manager = SessionManager(str(tmp_path))
     session = manager.create()
     session.start_runtime("new")
@@ -541,7 +541,10 @@ def test_large_file_result_marks_only_preview_lines_visible(tmp_path):
     prepared = agent._prepare_tool_results(
         [ToolResultBlock("read-big", content)]
     )[0]
-    assert prepared.content.startswith("<persisted-output>")
+    assert "middle lines omitted" in prepared.content
+    assert not (tmp_path / ".lantu/session/tool-results/read-big.txt").exists()
+    assert session.file_ledger.is_visible(path, first.content_hash, 1, 20)
+    assert session.file_ledger.is_visible(path, first.content_hash, 1191, 1199)
     assert not session.file_ledger.is_visible(path, first.content_hash, 1000, 1100)
 
     # The hash must describe the complete current file, so use the same source
@@ -558,6 +561,54 @@ def test_large_file_result_marks_only_preview_lines_visible(tmp_path):
         [ToolResultBlock("read-middle", middle_content)]
     )[0]
     assert "already visible" not in middle_result.content
+
+    # Re-reading a range wholly inside the displayed head is deduplicated.
+    head = replace(
+        first,
+        offset=0,
+        limit=10,
+        tool_call_id="read-head",
+    )
+    session.file_ledger.apply(head)
+    head_result = agent._prepare_tool_results(
+        [ToolResultBlock("read-head", "\n".join(f"{i}\t{'x' * 100}" for i in range(1, 11)))]
+    )[0]
+    assert "already visible" in head_result.content
+    session.close()
+
+
+def test_truncated_file_line_is_not_marked_fully_visible(tmp_path):
+    manager = SessionManager(str(tmp_path))
+    session = manager.create()
+    session.start_runtime("new")
+    agent = Agent(
+        MockLLMClient([]),
+        create_default_registry(work_dir=str(tmp_path)),
+        "anthropic",
+        work_dir=str(tmp_path),
+        session=session,
+    )
+    path = tmp_path / "minified.js"
+    full_content = "x" * 3_000
+    entry = FileLedger.build_entry(
+        path,
+        full_content,
+        operation="read",
+        limit=1,
+        tool_call_id="read-long-line",
+    )
+    session.file_ledger.apply(entry)
+    rendered = (
+        f"1\t{'x' * 2_000}... "
+        "(line truncated to 2000 chars; use Grep to search this line)"
+    )
+
+    prepared = agent._prepare_tool_results(
+        [ToolResultBlock("read-long-line", rendered)]
+    )[0]
+
+    assert "line truncated" in prepared.content
+    assert not session.file_ledger.is_visible(path, entry.content_hash, 1, 1)
     session.close()
 
 

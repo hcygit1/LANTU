@@ -13,7 +13,9 @@ from lantu.context.manager import (
     KEEP_RECENT_TOKENS,
     MIN_KEEP_MESSAGES,
     PERSISTED_TAG,
-    SINGLE_RESULT_CHAR_LIMIT,
+    TOOL_RESULT_INLINE_CHAR_LIMIT,
+    TOOL_RESULT_HEAD_CHARS,
+    TOOL_RESULT_TAIL_CHARS,
     CompactCircuitBreaker,
     _align_keep_start_to_tool_pair,
     _compute_keep_start_index,
@@ -24,8 +26,11 @@ from lantu.context.manager import (
     ensure_session_dir,
     extract_summary,
     make_persisted_preview,
+    make_head_tail_preview,
+    make_file_read_preview,
     persist_tool_result,
     prepare_tool_results,
+    prepare_tool_results_with_metadata,
     should_auto_compact,
 )
 from lantu.conversation import (
@@ -66,20 +71,22 @@ class TestMakePersistedPreview:
         assert "</persisted-output>" in preview
 
     def test_preview_truncated(self, tmp_path: Path) -> None:
-        content = "a" * 5_000
+        content = "a" * 10_000
         preview = make_persisted_preview(content, tmp_path / "test.txt")
-        lines = preview.split("\n")
-        preview_line = [l for l in lines if l.startswith("aaa")]
-        assert len(preview_line) == 1
-        assert len(preview_line[0]) == 2_000
+        assert "预览（前 4KB + 后 1KB）" in preview
+        assert "a" * TOOL_RESULT_HEAD_CHARS in preview
+        assert "a" * TOOL_RESULT_TAIL_CHARS in preview
 
 # ---------------------------------------------------------------------------
 # prepare_tool_results
 # ---------------------------------------------------------------------------
 
 class TestPrepareToolResults:
-    def test_single_oversized_persisted(self, tmp_path: Path) -> None:
-        big_content = "x" * (SINGLE_RESULT_CHAR_LIMIT + 100)
+    def test_aggregate_budget_is_64k(self) -> None:
+        assert AGGREGATE_CHAR_LIMIT == 64_000
+
+    def test_result_over_8k_is_persisted(self, tmp_path: Path) -> None:
+        big_content = "x" * (TOOL_RESULT_INLINE_CHAR_LIMIT + 100)
         source = [ToolResultBlock(tool_use_id="toolu_big", content=big_content)]
 
         prepared = prepare_tool_results(source, tmp_path)
@@ -88,20 +95,30 @@ class TestPrepareToolResults:
         assert prepared[0].content.startswith(PERSISTED_TAG)
         assert (tmp_path / "toolu_big.txt").exists()
 
-    def test_result_between_old_and_new_limit_is_preserved(self, tmp_path: Path) -> None:
+    def test_result_at_or_below_8k_stays_inline(self, tmp_path: Path) -> None:
+        content = "x" * TOOL_RESULT_INLINE_CHAR_LIMIT
+        source = [ToolResultBlock(tool_use_id="toolu_small", content=content)]
+
+        prepared = prepare_tool_results(source, tmp_path)
+
+        assert prepared[0].content == content
+        assert not (tmp_path / "toolu_small.txt").exists()
+
+    def test_result_over_8k_uses_head_and_tail_preview(self, tmp_path: Path) -> None:
         content = "x" * 30_000
         source = [ToolResultBlock(tool_use_id="toolu_mid", content=content)]
 
         prepared = prepare_tool_results(source, tmp_path)
 
-        assert prepared[0].content == content
-        assert not (tmp_path / "toolu_mid.txt").exists()
+        assert prepared[0].content.startswith(PERSISTED_TAG)
+        assert "middle content omitted" in prepared[0].content
+        assert (tmp_path / "toolu_mid.txt").exists()
 
     def test_aggregate_limit(self, tmp_path: Path) -> None:
-        content = "x" * (SINGLE_RESULT_CHAR_LIMIT - 1)
+        content = "x" * 7_000
         source = [
             ToolResultBlock(tool_use_id=f"toolu_agg_{i}", content=content)
-            for i in range(5)
+            for i in range(10)
         ]
 
         prepared = prepare_tool_results(source, tmp_path)
@@ -111,15 +128,117 @@ class TestPrepareToolResults:
         assert all(result.content == content for result in source)
         assert any(result.content.startswith(PERSISTED_TAG) for result in prepared)
 
-    def test_already_persisted_skipped(self, tmp_path: Path) -> None:
-        persisted_content = f"{PERSISTED_TAG}\nalready persisted\n</persisted-output>"
+    def test_aggregate_limit_handles_5k_results(self, tmp_path: Path) -> None:
         source = [
-            ToolResultBlock(tool_use_id="toolu_done", content=persisted_content)
+            ToolResultBlock(tool_use_id=f"toolu_5k_{i}", content="x" * 5_000)
+            for i in range(13)
         ]
 
         prepared = prepare_tool_results(source, tmp_path)
 
-        assert prepared[0].content == persisted_content
+        assert sum(len(result.content) for result in prepared) <= AGGREGATE_CHAR_LIMIT
+        assert any(result.content.startswith(PERSISTED_TAG) for result in prepared)
+
+    def test_aggregate_limit_handles_many_small_results(self, tmp_path: Path) -> None:
+        source = [
+            ToolResultBlock(tool_use_id=f"toolu_small_{i}", content="x" * 500)
+            for i in range(130)
+        ]
+
+        prepared = prepare_tool_results(source, tmp_path)
+
+        assert sum(len(result.content) for result in prepared) <= AGGREGATE_CHAR_LIMIT
+        assert any(result.content.startswith(PERSISTED_TAG) for result in prepared)
+        assert any(tmp_path.glob("toolu_small_*.txt"))
+
+    def test_aggregate_limit_compacts_existing_standard_previews(
+        self, tmp_path: Path
+    ) -> None:
+        source = [
+            ToolResultBlock(tool_use_id=f"toolu_large_{i}", content="x" * 20_000)
+            for i in range(13)
+        ]
+
+        prepared = prepare_tool_results(source, tmp_path)
+
+        assert sum(len(result.content) for result in prepared) <= AGGREGATE_CHAR_LIMIT
+
+    def test_file_results_are_excluded_from_ordinary_aggregate_budget(
+        self, tmp_path: Path
+    ) -> None:
+        file_content = "\n".join(f"{i}\t{'x' * 100}" for i in range(1, 1200))
+        source = [ToolResultBlock(tool_use_id="read-large", content=file_content)]
+
+        prepared = prepare_tool_results_with_metadata(
+            source,
+            tmp_path,
+            file_read_ids={"read-large"},
+        )
+
+        assert not prepared.results[0].content.startswith(PERSISTED_TAG)
+        assert not (tmp_path / "read-large.txt").exists()
+
+    def test_head_tail_preview_keeps_both_ends(self) -> None:
+        content = "h" * 10_000 + "MIDDLE" + "t" * 2_000
+        preview = make_head_tail_preview(content)
+
+        assert preview.startswith("h" * TOOL_RESULT_HEAD_CHARS)
+        assert preview.endswith("t" * TOOL_RESULT_TAIL_CHARS)
+        assert "middle content omitted" in preview
+
+    def test_persisted_tag_from_tool_output_does_not_bypass_limit(
+        self, tmp_path: Path
+    ) -> None:
+        persisted_content = f"{PERSISTED_TAG}\nalready persisted\n</persisted-output>"
+        source = [
+            ToolResultBlock(
+                tool_use_id="toolu_done",
+                content=persisted_content + ("x" * TOOL_RESULT_INLINE_CHAR_LIMIT),
+            )
+        ]
+
+        prepared = prepare_tool_results(source, tmp_path)
+
+        assert prepared[0].content.startswith(PERSISTED_TAG)
+        assert (tmp_path / "toolu_done.txt").exists()
+
+    def test_explicitly_persisted_result_can_be_reused(self, tmp_path: Path) -> None:
+        content = "x" * (TOOL_RESULT_INLINE_CHAR_LIMIT + 1)
+        source = [ToolResultBlock(tool_use_id="toolu_done", content=content)]
+
+        prepared = prepare_tool_results_with_metadata(
+            source,
+            tmp_path,
+            already_persisted_ids={"toolu_done"},
+        )
+
+        assert prepared.results[0].content == content
+        assert not (tmp_path / "toolu_done.txt").exists()
+
+    def test_file_read_preview_keeps_complete_head_and_tail_lines(self) -> None:
+        content = "\n".join(f"{i}\t{'x' * 100}" for i in range(1, 1200))
+
+        preview, ranges = make_file_read_preview(content)
+
+        assert preview.startswith("1\t")
+        assert preview.endswith("1199\t" + "x" * 100)
+        assert "middle lines omitted: 40-1190" in preview
+        assert ranges[0][0] == 1
+        assert ranges[-1][1] == 1199
+        assert len(ranges) == 2
+
+    def test_file_read_preview_excludes_truncated_lines_from_visible_ranges(
+        self,
+    ) -> None:
+        content = (
+            "1\tcomplete\n"
+            "2\tpartial... (line truncated to 2000 chars; use Grep to search this line)"
+        )
+
+        preview, ranges = make_file_read_preview(content)
+
+        assert preview == content
+        assert ranges == ((1, 1),)
 
 # ---------------------------------------------------------------------------
 # compute_compact_threshold

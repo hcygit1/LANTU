@@ -19,9 +19,18 @@ from lantu.conversation import (
 # 常量
 # ---------------------------------------------------------------------------
 
-SINGLE_RESULT_CHAR_LIMIT = 50_000
-AGGREGATE_CHAR_LIMIT = 200_000
-PREVIEW_CHARS = 2_000
+TOOL_RESULT_INLINE_CHAR_LIMIT = 8_192
+AGGREGATE_CHAR_LIMIT = 64_000
+TOOL_RESULT_HEAD_CHARS = 4_096
+TOOL_RESULT_TAIL_CHARS = 1_024
+AGGREGATE_PREVIEW_HEAD_CHARS = 512
+AGGREGATE_PREVIEW_TAIL_CHARS = 128
+
+# File reads use the same size policy, while their preview also records the
+# visible source-line ranges in File Ledger.
+FILE_READ_PREVIEW_CHAR_LIMIT = TOOL_RESULT_INLINE_CHAR_LIMIT
+FILE_READ_HEAD_CHARS = TOOL_RESULT_HEAD_CHARS
+FILE_READ_TAIL_CHARS = TOOL_RESULT_TAIL_CHARS
 
 SUMMARY_OUTPUT_RESERVE = 20_000
 # 软触发安全边距：effectiveWindow − 13K 为自动压缩触发线，走熔断器保护
@@ -42,6 +51,7 @@ KEEP_MAX_TOKENS = 40_000
 MIN_SUMMARIZE_PREFIX_TOKENS = 2_000
 
 PERSISTED_TAG = "<persisted-output>"
+TRUNCATED_FILE_LINE_MARKER = "(line truncated to "
 
 SESSION_SUBDIR = ".lantu/session/tool-results"
 
@@ -81,6 +91,7 @@ class ToolResultPresentation:
     mode: str  # ``inline`` or ``artifact``
     artifact_path: str | None = None
     preview_line_count: int = 0
+    visible_line_ranges: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass
@@ -148,35 +159,161 @@ def persist_tool_result(tool_use_id: str, content: str, session_dir: Path) -> Pa
     return file_path
 
 
-def make_persisted_preview(content: str, file_path: Path) -> str:
+def make_persisted_preview(
+    content: str,
+    file_path: Path,
+    *,
+    head_chars: int = TOOL_RESULT_HEAD_CHARS,
+    tail_chars: int = TOOL_RESULT_TAIL_CHARS,
+) -> str:
     size_kb = len(content.encode("utf-8")) // 1024
-    preview = content[:PREVIEW_CHARS]
+    preview = make_head_tail_preview(
+        content,
+        head_chars=head_chars,
+        tail_chars=tail_chars,
+    )
+    if (
+        head_chars == TOOL_RESULT_HEAD_CHARS
+        and tail_chars == TOOL_RESULT_TAIL_CHARS
+    ):
+        preview_label = "前 4KB + 后 1KB"
+    else:
+        preview_label = f"前 {head_chars} 字符 + 后 {tail_chars} 字符"
     return (
         f"{PERSISTED_TAG}\n"
         f"输出太大（{size_kb}KB），完整内容已保存到：\n"
         f"{file_path}\n"
         f"\n"
-        f"预览（前 2KB）：\n"
+        f"预览（{preview_label}）：\n"
         f"{preview}\n"
         f"</persisted-output>"
     )
 
 
-def _preview_line_count(content: str) -> int:
-    """Count only complete lines in the displayed preview."""
-    if len(content) <= PREVIEW_CHARS:
-        return len(content.splitlines())
-    preview = content[:PREVIEW_CHARS]
-    complete = preview.rsplit("\n", 1)[0] if "\n" in preview else ""
-    return len(complete.splitlines())
+def make_persisted_reference(file_path: Path) -> str:
+    return (
+        f"{PERSISTED_TAG}\n"
+        "完整内容已保存到：\n"
+        f"{file_path}\n"
+        "</persisted-output>"
+    )
+
+
+def make_head_tail_preview(
+    content: str,
+    *,
+    head_chars: int = TOOL_RESULT_HEAD_CHARS,
+    tail_chars: int = TOOL_RESULT_TAIL_CHARS,
+) -> str:
+    """Keep the beginning and end of an oversized non-file tool result."""
+    if len(content) <= head_chars + tail_chars:
+        return content
+    return (
+        f"{content[:head_chars]}\n"
+        "... [middle content omitted] ...\n"
+        f"{content[-tail_chars:]}"
+    )
+
+
+def _line_number(line: str) -> int | None:
+    prefix, separator, _ = line.partition("\t")
+    if not separator:
+        return None
+    try:
+        return int(prefix)
+    except ValueError:
+        return None
+
+
+def _ranges_from_line_indexes(
+    lines: list[str], indexes: list[int]
+) -> tuple[tuple[int, int], ...]:
+    numbers = sorted(
+        number
+        for index in indexes
+        if 0 <= index < len(lines)
+        and TRUNCATED_FILE_LINE_MARKER not in lines[index]
+        for number in [_line_number(lines[index])]
+        if number is not None
+    )
+    ranges: list[tuple[int, int]] = []
+    for number in numbers:
+        if not ranges or number > ranges[-1][1] + 1:
+            ranges.append((number, number))
+        else:
+            ranges[-1] = (ranges[-1][0], number)
+    return tuple(ranges)
+
+
+def make_file_read_preview(
+    content: str,
+    *,
+    head_chars: int = FILE_READ_HEAD_CHARS,
+    tail_chars: int = FILE_READ_TAIL_CHARS,
+) -> tuple[str, tuple[tuple[int, int], ...]]:
+    """Keep complete numbered lines at both ends and report visible ranges."""
+    if len(content) <= FILE_READ_PREVIEW_CHAR_LIMIT:
+        lines = content.splitlines()
+        return content, _ranges_from_line_indexes(lines, list(range(len(lines))))
+
+    lines = content.splitlines()
+    if not lines:
+        return content, ()
+
+    head_indexes: list[int] = []
+    used = 0
+    for index, line in enumerate(lines):
+        cost = len(line) + (1 if head_indexes else 0)
+        if head_indexes and used + cost > head_chars:
+            break
+        head_indexes.append(index)
+        used += cost
+
+    tail_indexes: list[int] = []
+    used = 0
+    for index in range(len(lines) - 1, -1, -1):
+        if index in head_indexes:
+            break
+        line = lines[index]
+        cost = len(line) + (1 if tail_indexes else 0)
+        if tail_indexes and used + cost > tail_chars:
+            break
+        tail_indexes.append(index)
+        used += cost
+    tail_indexes.reverse()
+
+    selected = head_indexes + tail_indexes
+    if not tail_indexes:
+        return "\n".join(lines[index] for index in head_indexes), _ranges_from_line_indexes(lines, selected)
+
+    first_omitted = head_indexes[-1] + 1
+    last_omitted = tail_indexes[0] - 1
+    omitted_numbers = [
+        _line_number(lines[index])
+        for index in (first_omitted, last_omitted)
+        if 0 <= index < len(lines)
+    ]
+    if len(omitted_numbers) == 2:
+        marker = f"... [middle lines omitted: {omitted_numbers[0]}-{omitted_numbers[1]}] ..."
+    else:
+        marker = "... [middle lines omitted] ..."
+    preview = "\n".join(
+        [*(lines[index] for index in head_indexes), marker, *(lines[index] for index in tail_indexes)]
+    )
+    return preview, _ranges_from_line_indexes(lines, selected)
 
 
 def prepare_tool_results_with_metadata(
     results: list[ToolResultBlock],
     session_dir: Path,
+    *,
+    file_read_ids: set[str] | None = None,
+    already_persisted_ids: set[str] | None = None,
 ) -> PreparedToolResults:
     """Finalize one turn's tool results before adding them to conversation history."""
     prepared: list[ToolResultBlock] = []
+    file_read_ids = file_read_ids or set()
+    already_persisted_ids = already_persisted_ids or set()
     presentations: dict[str, ToolResultPresentation] = {}
     for result in results:
         content = result.content
@@ -184,9 +321,17 @@ def prepare_tool_results_with_metadata(
             tool_use_id=result.tool_use_id,
             mode="inline",
         )
-        if (
-            not content.startswith(PERSISTED_TAG)
-            and len(content) > SINGLE_RESULT_CHAR_LIMIT
+        if result.tool_use_id in file_read_ids:
+            content, visible_ranges = make_file_read_preview(content)
+            presentations[result.tool_use_id] = ToolResultPresentation(
+                tool_use_id=result.tool_use_id,
+                mode="file",
+                visible_line_ranges=visible_ranges,
+            )
+        elif (
+            result.tool_use_id not in file_read_ids
+            and result.tool_use_id not in already_persisted_ids
+            and len(content) > TOOL_RESULT_INLINE_CHAR_LIMIT
         ):
             path = persist_tool_result(result.tool_use_id, content, session_dir)
             content = make_persisted_preview(content, path)
@@ -194,7 +339,7 @@ def prepare_tool_results_with_metadata(
                 tool_use_id=result.tool_use_id,
                 mode="artifact",
                 artifact_path=str(path),
-                preview_line_count=_preview_line_count(result.content),
+                preview_line_count=0,
             )
         prepared.append(
             ToolResultBlock(
@@ -204,12 +349,20 @@ def prepare_tool_results_with_metadata(
             )
         )
 
-    total = sum(len(result.content) for result in prepared)
+    raw_by_id = {result.tool_use_id: result.content for result in results}
+    total = sum(
+        len(result.content)
+        for result in prepared
+        if result.tool_use_id not in file_read_ids
+    )
     candidates = sorted(
         (
             (index, result)
             for index, result in enumerate(prepared)
-            if not result.content.startswith(PERSISTED_TAG)
+            if (
+                result.tool_use_id not in file_read_ids
+                and result.tool_use_id not in already_persisted_ids
+            )
         ),
         key=lambda item: len(item[1].content),
         reverse=True,
@@ -217,20 +370,56 @@ def prepare_tool_results_with_metadata(
     for index, result in candidates:
         if total <= AGGREGATE_CHAR_LIMIT:
             break
-        path = persist_tool_result(result.tool_use_id, result.content, session_dir)
-        preview = make_persisted_preview(result.content, path)
+        raw_content = raw_by_id[result.tool_use_id]
+        path = persist_tool_result(result.tool_use_id, raw_content, session_dir)
+        preview = make_persisted_preview(
+            raw_content,
+            path,
+            head_chars=AGGREGATE_PREVIEW_HEAD_CHARS,
+            tail_chars=AGGREGATE_PREVIEW_TAIL_CHARS,
+        )
+        if len(preview) >= len(result.content):
+            preview = make_persisted_reference(path)
+        if len(preview) >= len(result.content):
+            continue
         prepared[index] = ToolResultBlock(
             tool_use_id=result.tool_use_id,
             content=preview,
             is_error=result.is_error,
         )
+        previous = presentations.get(result.tool_use_id)
         presentations[result.tool_use_id] = ToolResultPresentation(
             tool_use_id=result.tool_use_id,
             mode="artifact",
             artifact_path=str(path),
-            preview_line_count=_preview_line_count(result.content),
+            preview_line_count=0,
+            visible_line_ranges=previous.visible_line_ranges if previous else (),
         )
         total += len(preview) - len(result.content)
+
+    if total > AGGREGATE_CHAR_LIMIT:
+        artifact_candidates = sorted(
+            (
+                (index, result, presentations[result.tool_use_id])
+                for index, result in enumerate(prepared)
+                if result.tool_use_id not in file_read_ids
+                and presentations[result.tool_use_id].artifact_path is not None
+            ),
+            key=lambda item: len(item[1].content),
+            reverse=True,
+        )
+        for index, result, presentation in artifact_candidates:
+            if total <= AGGREGATE_CHAR_LIMIT:
+                break
+            reference = make_persisted_reference(Path(presentation.artifact_path))
+            if len(reference) >= len(result.content):
+                continue
+            prepared[index] = ToolResultBlock(
+                tool_use_id=result.tool_use_id,
+                content=reference,
+                is_error=result.is_error,
+            )
+            total += len(reference) - len(result.content)
 
     return PreparedToolResults(prepared, presentations)
 

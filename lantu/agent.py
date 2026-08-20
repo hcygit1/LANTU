@@ -1288,6 +1288,7 @@ class Agent:
     ) -> list[ToolResultBlock]:
         """Deduplicate visible file ranges, then record what reached history."""
         deduplicated: list[ToolResultBlock] = []
+        deduplicated_ids: set[str] = set()
         for result in results:
             observation = self.file_ledger.observation(result.tool_use_id)
             if (
@@ -1309,11 +1310,18 @@ class Agent:
                         is_error=result.is_error,
                     )
                 )
+                deduplicated_ids.add(result.tool_use_id)
             else:
                 deduplicated.append(result)
 
         prepared = prepare_tool_results_with_metadata(
-            deduplicated, self.session_dir
+            deduplicated,
+            self.session_dir,
+            file_read_ids={
+                result.tool_use_id
+                for result in deduplicated
+                if self.file_ledger.observation(result.tool_use_id) is not None
+            },
         )
         for result in deduplicated:
             observation = self.file_ledger.observation(result.tool_use_id)
@@ -1322,7 +1330,17 @@ class Agent:
             presentation = prepared.presentations.get(result.tool_use_id)
             if presentation is None:
                 continue
-            if presentation.mode == "inline":
+            if result.tool_use_id in deduplicated_ids:
+                continue
+            if presentation.visible_line_ranges:
+                for range_start, range_end in presentation.visible_line_ranges:
+                    self.file_ledger.mark_visible(
+                        observation.path,
+                        observation.content_hash,
+                        range_start,
+                        range_end,
+                    )
+            elif presentation.mode == "inline":
                 self.file_ledger.mark_visible(
                     observation.path,
                     observation.content_hash,
