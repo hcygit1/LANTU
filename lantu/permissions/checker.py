@@ -90,8 +90,22 @@ class PermissionChecker:
                 if self._is_plan_file(content):
                     return Decision(effect="allow", reason="Plan mode: plan file write")
 
+        # User rules are checked before the more expensive hard-safety checks.
+        # A deny is terminal; an allow/ask is only a preference and must not
+        # bypass dangerous-command or sandbox enforcement below.
+        rule_result = self.rule_engine.evaluate(tool.name, content)
+        initial_rule_result = rule_result
+        if rule_result == "deny":
+            return Decision(effect="deny", reason="权限规则拒绝")
+        rule_reason = {
+            "allow": "权限规则放行",
+            "ask": "权限规则要求确认",
+        }.get(rule_result)
+
         # Layer 1: 安全的只读命令（自动放行）
         if tool.category == "command" and is_safe_command(content or ""):
+            if rule_result == "ask":
+                return Decision(effect="ask", reason=rule_reason or "权限规则要求确认")
             return Decision(effect="allow", reason="Safe read-only command")
 
         # Layer 1b: 危险命令黑名单（仅 Bash）
@@ -110,12 +124,12 @@ class PermissionChecker:
             subcommands = [s.strip() for s in re.split(r'\s*(?:&&|\|\||[;|])\s*', content) if s.strip()]
             if not subcommands:
                 subcommands = [content]
-            has_ask = False
+            has_ask = initial_rule_result == "ask"
             for sub in subcommands:
-                rule_result = self.rule_engine.evaluate(tool.name, sub)
-                if rule_result == "deny":
+                subcommand_rule = self.rule_engine.evaluate(tool.name, sub)
+                if subcommand_rule == "deny":
                     return Decision(effect="deny", reason="权限规则拒绝")
-                if rule_result == "ask":
+                if subcommand_rule == "ask":
                     has_ask = True
             if has_ask:
                 return Decision(effect="ask", reason="权限规则要求确认")
@@ -127,12 +141,10 @@ class PermissionChecker:
             if not ok and self.mode != PermissionMode.BYPASS:
                 return Decision(effect="ask", reason=f"路径沙箱拦截: {reason}")
 
-        # Layer 3: 规则引擎匹配
-        rule_result = self.rule_engine.evaluate(tool.name, content)
-        if rule_result == "allow":
+        if initial_rule_result == "allow":
             return Decision(effect="allow", reason="权限规则放行")
-        if rule_result == "deny":
-            return Decision(effect="deny", reason="权限规则拒绝")
+        if initial_rule_result == "ask":
+            return Decision(effect="ask", reason=rule_reason or "权限规则要求确认")
 
         # Layer 4b: 会话级放行（内存中，优先于模式兜底）
         if self._check_session_allowed(tool.name, content or ""):

@@ -364,6 +364,46 @@ class TestPermissionChecker:
         d = checker.check(tool, {"command": "git commit -m test"})
         assert d.effect == "allow"
 
+    def test_rule_deny_short_circuits_before_hard_checks(self) -> None:
+        from lantu.tools.bash import Bash
+
+        tmpdir = Path(tempfile.mkdtemp())
+        rules_file = tmpdir / "rules.yaml"
+        rules_file.write_text(yaml.dump([
+            {"rule": "Bash(git *)", "effect": "deny"},
+        ]))
+        checker = PermissionChecker(
+            detector=DangerousCommandDetector(),
+            sandbox=PathSandbox(str(tmpdir)),
+            rule_engine=RuleEngine(project_rules_path=rules_file),
+            mode=PermissionMode.BYPASS,
+        )
+
+        decision = checker.check(Bash(), {"command": "git status"})
+
+        assert decision.effect == "deny"
+        assert decision.reason == "权限规则拒绝"
+
+    def test_rule_allow_does_not_bypass_dangerous_command(self) -> None:
+        from lantu.tools.bash import Bash
+
+        tmpdir = Path(tempfile.mkdtemp())
+        rules_file = tmpdir / "rules.yaml"
+        rules_file.write_text(yaml.dump([
+            {"rule": "Bash(*)", "effect": "allow"},
+        ]))
+        checker = PermissionChecker(
+            detector=DangerousCommandDetector(),
+            sandbox=PathSandbox(str(tmpdir)),
+            rule_engine=RuleEngine(project_rules_path=rules_file),
+            mode=PermissionMode.DEFAULT,
+        )
+
+        decision = checker.check(Bash(), {"command": "rm -rf /"})
+
+        assert decision.effect == "deny"
+        assert "危险命令" in decision.reason
+
 # ===========================================================================
 # 集成测试：Agent + 权限系统（端到端）
 # ===========================================================================
