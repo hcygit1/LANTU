@@ -126,7 +126,12 @@ async def prefetch_runtime_memories(
             conversation = ConversationManager()
             conversation.history = [Message(role="user", content=user_message)]
             collected = ""
-            async for event in side_client.stream(conversation, system=system_prompt):
+            async for event in runtime.agent.request_recorder.stream(
+                side_client,
+                conversation,
+                system=system_prompt,
+                call_kind="selector",
+            ):
                 if isinstance(event, TextDelta):
                     collected += event.text
                 elif isinstance(event, StreamEnd):

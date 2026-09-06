@@ -392,6 +392,7 @@ class MemoryManager:
         client: Any,
         conversation: ConversationManager,
         protocol: str,
+        request_recorder: Any | None = None,
     ) -> None:
         """触发记忆提取（参照 Go 版 extractor.go）。
 
@@ -445,9 +446,18 @@ class MemoryManager:
 
         collected = ""
         try:
-            async for event in client.stream(
-                extract_conv, system="You are a memory extraction assistant."
-            ):
+            system_prompt = "You are a memory extraction assistant."
+            stream = (
+                request_recorder.stream(
+                    client,
+                    extract_conv,
+                    system=system_prompt,
+                    call_kind="memory_extraction",
+                )
+                if request_recorder is not None
+                else client.stream(extract_conv, system=system_prompt)
+            )
+            async for event in stream:
                 if isinstance(event, TextDelta):
                     collected += event.text
                 elif isinstance(event, StreamEnd):

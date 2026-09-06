@@ -23,6 +23,7 @@ _KINDS = {
     "tool.failed": "tool",
     "tool.interrupted": "tool",
     "model.request.started": "model",
+    "model.request.prepared": "model",
     "model.request.completed": "model",
     "model.request.failed": "model",
     "model.request.interrupted": "model",

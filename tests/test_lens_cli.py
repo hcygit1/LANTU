@@ -51,6 +51,13 @@ def test_lens_parser_supports_evidence() -> None:
     assert args.json_output is True
 
 
+def test_lens_parser_supports_cache() -> None:
+    args = build_parser().parse_args(["lens", "cache", "session_a", "--json"])
+    assert args.action == "cache"
+    assert args.session_id == "session_a"
+    assert args.json_output is True
+
+
 def test_run_lens_lists_events_as_json(tmp_path: Path, monkeypatch, capsys) -> None:
     sessions_dir = tmp_path / ".lantu" / "sessions"
     journal = SessionJournal(sessions_dir, "session_a")
@@ -83,6 +90,45 @@ def test_run_lens_prints_diagnosis_with_evidence(tmp_path: Path, monkeypatch, ca
     output = capsys.readouterr().out
     assert "tool_failed" in output
     assert "evidence #3" in output
+
+
+def test_run_lens_prints_cache_report(tmp_path: Path, monkeypatch, capsys) -> None:
+    sessions_dir = tmp_path / ".lantu" / "sessions"
+    journal = SessionJournal(sessions_dir, "session_a")
+    journal.append("session.created", {})
+    journal.append(
+        "model.request.started",
+        {
+            "model_call_id": "call_1",
+            "call_kind": "main",
+            "provider": "openai-compat",
+            "model": "glm",
+            "assembly": {
+                "digest": "d",
+                "system_hash": "s",
+                "tools_hash": "t",
+                "messages_hash": "m",
+                "chars": 1,
+                "messages": [],
+            },
+        },
+        runtime_id="runtime_a",
+        turn_id="turn_a",
+    )
+    journal.append(
+        "usage.recorded",
+        {"model_call_id": "call_1", "input_tokens": 10},
+        runtime_id="runtime_a",
+        turn_id="turn_a",
+    )
+    journal.close()
+    monkeypatch.chdir(tmp_path)
+
+    run_lens("cache", "session_a")
+
+    output = capsys.readouterr().out
+    assert "cold_start" in output
+    assert "main" in output
 
 
 def test_run_lens_prints_tasks_and_actions(tmp_path: Path, monkeypatch, capsys) -> None:

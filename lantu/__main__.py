@@ -21,7 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     lens_parser.add_argument(
         "action",
         choices=[
-            "list", "events", "search", "tasks", "actions", "diagnose",
+            "list", "events", "search", "tasks", "actions", "diagnose", "cache",
             "annotate", "compare", "export", "replay", "evidence", "web",
         ],
         nargs="?",
@@ -187,6 +187,15 @@ def run_lens(
         if not session_id:
             raise SystemExit("Usage: lantu lens diagnose <session_id> [--json]")
         report = reader.report(session_id)
+        if json_output:
+            print(json.dumps(report.to_dict(), ensure_ascii=False))
+        else:
+            print(report.render_text())
+        return
+    if action == "cache":
+        if not session_id:
+            raise SystemExit("Usage: lantu lens cache <session_id> [--json]")
+        report = reader.cache_report(session_id)
         if json_output:
             print(json.dumps(report.to_dict(), ensure_ascii=False))
         else:
@@ -443,7 +452,7 @@ async def _run_prompt_with_client(
         UsageEvent,
     )
     from lantu.client import resolve_context_window
-    from lantu.conversation import ConversationManager
+    from lantu.conversation import ConversationManager, MessageKind
     from lantu.memory.instructions import load_instructions
     from lantu.permissions import (
         DangerousCommandDetector,
@@ -710,7 +719,7 @@ async def _run_prompt_with_client(
                 break
             continue
         for note in notes:
-            conv.add_system_reminder(note)
+            conv.add_system_reminder(note, kind=MessageKind.FROZEN)
         # 后续 team 轮询仍用 run_to_completion，避免重复事件循环
         last_result = await agent.run_to_completion(
             "Teammate notifications received. Process them and continue.", conv

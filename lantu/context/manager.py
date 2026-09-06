@@ -861,6 +861,7 @@ async def auto_compact(
     transcript_path: str = "",
     budget_messages: list[Message] | None = None,
     system_prompt: str = "",
+    request_recorder: Any | None = None,
 ) -> CompactEvent | str | None:
     # 以真实 API 用量为锚点做阈值判断：current_tokens() 返回上次计费基准
     # （input + cache_read + cache_creation + output）加上锚点之后新增消息的
@@ -924,11 +925,22 @@ async def auto_compact(
             from lantu.tools.base import StreamEnd, StreamEvent, TextDelta
 
             collected_text = ""
-            async for event in client.stream(
-                summary_conv,
-                system=system_prompt,
-                tools=tool_schemas,
-            ):
+            stream = (
+                request_recorder.stream(
+                    client,
+                    summary_conv,
+                    system=system_prompt,
+                    tools=tool_schemas,
+                    call_kind="compaction",
+                )
+                if request_recorder is not None
+                else client.stream(
+                    summary_conv,
+                    system=system_prompt,
+                    tools=tool_schemas,
+                )
+            )
+            async for event in stream:
                 if isinstance(event, TextDelta):
                     collected_text += event.text
                 elif isinstance(event, StreamEnd):

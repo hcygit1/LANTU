@@ -34,6 +34,7 @@ EVENT_TYPES = frozenset(
         "permission.decided",
         "error.occurred",
         "model.request.started",
+        "model.request.prepared",
         "model.request.completed",
         "model.request.failed",
         "model.request.interrupted",

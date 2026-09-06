@@ -28,6 +28,7 @@ from lantu.tools.lens.capture import (
 )
 from lantu.tools.lens.web import create_lens_app, run_lens_web
 from lantu.tools.lens.tasks import TaskSegment, segment_tasks
+from lantu.tools.lens.cache import CacheCall, CacheReport, build_cache_report
 
 __all__ = [
     "LensReader",
@@ -63,4 +64,7 @@ __all__ = [
     "correlate_evidence",
     "create_lens_app",
     "run_lens_web",
+    "CacheCall",
+    "CacheReport",
+    "build_cache_report",
 ]

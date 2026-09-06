@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -21,7 +22,12 @@ from lantu.context import (
     ensure_session_dir,
     prepare_tool_results_with_metadata,
 )
-from lantu.conversation import ConversationManager, ToolResultBlock, ToolUseBlock
+from lantu.conversation import (
+    ConversationManager,
+    MessageKind,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from lantu.conversation import ThinkingBlock as ConvThinkingBlock
 from lantu.context.repo_map import RepoMap, RepoMapSnapshot
 from lantu.memory.auto_memory import MemoryManager
@@ -46,6 +52,7 @@ from lantu.tools.base import (
     ToolCallStart,
     ToolResult,
 )
+from lantu.tools.lens.request_trace import LensRequestRecorder
 
 log = logging.getLogger(__name__)
 
@@ -350,6 +357,11 @@ class Agent:
         self._agent_catalog: str = ""
         self._agent_catalog_list: list[tuple[str, str]] = []
         self.agent_id: str = uuid.uuid4().hex[:12]
+        self.request_recorder = LensRequestRecorder(
+            session,
+            protocol=protocol,
+            agent_id=self.agent_id,
+        )
         self.parent_id: str | None = None
         self.trace_id: str | None = None
         self.coordinator_mode: bool = False
@@ -505,6 +517,34 @@ class Agent:
             for n in self.hook_engine.drain_notifications()
         ]
 
+    def _refresh_runtime_appendix(
+        self, conversation: ConversationManager, iteration: int
+    ) -> None:
+        """Append keyed runtime snapshots without rewriting prior messages."""
+        try:
+            result = subprocess.run(
+                ["git", "-C", self.work_dir, "status", "--short"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            git_status = result.stdout.strip() if result.returncode == 0 else "unavailable"
+        except (OSError, subprocess.SubprocessError):
+            git_status = "unavailable"
+        conversation.add_appendix(
+            "git_status",
+            "<runtime-state key=\"git_status\">\n"
+            + (git_status or "clean")
+            + "\n</runtime-state>",
+        )
+        plan_state = "planning" if self.plan_mode else "normal"
+        conversation.add_appendix(
+            "task_progress",
+            f"<runtime-state key=\"task_progress\">iteration={iteration}; "
+            f"plan_mode={plan_state}</runtime-state>",
+        )
+
     async def _run_core(
         self, conversation: ConversationManager
     ) -> AsyncIterator[AgentEvent]:
@@ -546,7 +586,10 @@ class Agent:
             self._consume_mailbox(conversation)
             if self.notification_fn:
                 for note in self.notification_fn():
-                    conversation.add_system_reminder(note)
+                    conversation.add_system_reminder(
+                        note,
+                        kind=MessageKind.FROZEN,
+                    )
 
             if self.hook_engine:
                 ctx = self._build_hook_context("pre_send")
@@ -555,6 +598,7 @@ class Agent:
                     yield he
 
             self._append_hook_prompts(conversation)
+            self._refresh_runtime_appendix(conversation, iteration)
             system = self._get_system_prompt()
 
             if self.plan_mode:
@@ -572,7 +616,7 @@ class Agent:
 
             if self.hook_engine:
                 for note in self.hook_engine.drain_notifications():
-                    conversation.add_system_reminder(
+                    conversation.add_ephemeral(
                         f"Hook [{note.hook_id}] {note.event}: {note.output}"
                     )
 
@@ -600,6 +644,7 @@ class Agent:
                 system_prompt=system,
                 tool_schemas=tools,
                 transcript_path=self._transcript_path,
+                request_recorder=self.request_recorder,
             )
             if isinstance(compact_result, CompactEvent):
                 yield CompactNotification(
@@ -618,52 +663,21 @@ class Agent:
 
             collector = StreamCollector()
             self._sync_schema_epoch()
-            model_call_id = uuid.uuid4().hex
-            model_started = time.monotonic()
-            self._record_model_event(
-                "model.request.started",
-                model_call_id,
-                {"provider": self.protocol, "model": getattr(self.client, "model", "")},
+            llm_stream = self.request_recorder.stream(
+                self.client,
+                conversation,
+                system=system,
+                tools=tools,
+                call_kind="main",
+                schema_epoch_id=self._schema_epoch_id,
             )
             try:
-                from lantu.client import model_call_context
-
-                session_id = self.session.session_id if self.session is not None else None
-                with model_call_context(model_call_id, session_id):
-                    llm_stream = self.client.stream(conversation, system=system, tools=tools)
-                    async for event in collector.consume(llm_stream):
-                        yield event
-            except asyncio.CancelledError:
-                self._record_model_event(
-                    "model.request.interrupted",
-                    model_call_id,
-                    {
-                        "reason": "cancelled",
-                        "result_known": False,
-                        "elapsed_ms": int((time.monotonic() - model_started) * 1000),
-                    },
-                )
-                raise
-            except Exception as exc:
-                self._record_model_event(
-                    "model.request.failed",
-                    model_call_id,
-                    {
-                        "error": {"type": type(exc).__name__, "message": str(exc)},
-                        "elapsed_ms": int((time.monotonic() - model_started) * 1000),
-                    },
-                )
-                raise
+                async for event in collector.consume(llm_stream):
+                    yield event
+            finally:
+                conversation.clear_ephemeral()
 
             response = collector.response
-            self._record_model_event(
-                "model.request.completed",
-                model_call_id,
-                {
-                    "response_id": getattr(response, "response_id", None),
-                    "elapsed_ms": int((time.monotonic() - model_started) * 1000),
-                },
-            )
 
             if self.hook_engine:
                 ctx = self._build_hook_context("post_receive", message=response.text)
@@ -874,7 +888,10 @@ class Agent:
                     try:
                         recall = self.memory_recall_task.result()
                         if recall:
-                            conversation.add_system_reminder(recall)
+                            conversation.add_system_reminder(
+                                recall,
+                                reminder_key="memory_recall",
+                            )
                     except Exception:
                         pass
                     self._memory_recall_consumed = True
@@ -1105,23 +1122,6 @@ class Agent:
         self._record_tool_finished(tc, result, elapsed)
         yield result, elapsed, is_unknown
 
-    def _record_model_event(
-        self, event_type: str, model_call_id: str, payload: dict[str, Any]
-    ) -> None:
-        if self.session is None:
-            return
-        from lantu.memory.session import ExecutionEvent
-
-        event_payload = {"model_call_id": model_call_id, **payload}
-        if self._schema_epoch_id is not None:
-            event_payload.setdefault("schema_epoch_id", self._schema_epoch_id)
-        self.session.record(
-            ExecutionEvent(
-                event_type,
-                event_payload,
-            )
-        )
-
     def _sync_schema_epoch(self) -> None:
         """Record a new tool-schema view before the next provider request."""
         epoch = self.registry.schema_epoch(self.protocol)
@@ -1180,23 +1180,6 @@ class Agent:
     def _record_usage(self, response: LLMResponse) -> UsageEvent:
         self.total_input_tokens += response.input_tokens
         self.total_output_tokens += response.output_tokens
-
-        if self.session is not None:
-            from lantu.memory.session import ExecutionEvent
-
-            self.session.record(
-                ExecutionEvent(
-                    "usage.recorded",
-                    {
-                        "provider": self.protocol,
-                        "model": getattr(self.client, "model", ""),
-                        "input_tokens": response.input_tokens,
-                        "output_tokens": response.output_tokens,
-                        "cache_read_tokens": response.cache_read,
-                        "cache_creation_tokens": response.cache_creation,
-                    },
-                )
-            )
 
         return UsageEvent(
             input_tokens=self.total_input_tokens,
@@ -1432,7 +1415,10 @@ class Agent:
         self._extracting = True
         try:
             await self.memory_manager.extract(
-                self.client, conversation, self.protocol
+                self.client,
+                conversation,
+                self.protocol,
+                request_recorder=self.request_recorder,
             )
         except Exception as e:
             log.debug("Memory extraction failed: %s", e)
@@ -1462,6 +1448,7 @@ class Agent:
             system_prompt=self._get_system_prompt(),
             tool_schemas=self.registry.get_all_schemas(self.protocol),
             transcript_path=self._transcript_path,
+            request_recorder=self.request_recorder,
         )
         if isinstance(result, CompactEvent):
             self.file_ledger.clear_visible()

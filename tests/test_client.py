@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from lantu.client import OpenAICompatClient
+from lantu.client import OpenAICompatClient, model_call_context
 from lantu.config import ProviderConfig
 from lantu.conversation import ConversationManager
 from lantu.tools.base import StreamEnd
@@ -92,6 +92,7 @@ async def test_openai_compat_passes_reasoning_effort_in_extra_body() -> None:
     )
     client = OpenAICompatClient(provider)
     captured: dict = {}
+    prepared: list[dict] = []
 
     async def response_stream():
         yield SimpleNamespace(
@@ -112,7 +113,8 @@ async def test_openai_compat_passes_reasoning_effort_in_extra_body() -> None:
         chat=SimpleNamespace(completions=SimpleNamespace(create=create))
     )
     try:
-        _ = [event async for event in client.stream(ConversationManager())]
+        with model_call_context("call_1", on_prepared=prepared.append):
+            _ = [event async for event in client.stream(ConversationManager())]
     finally:
         client._client = original_client
         await client.aclose()
@@ -121,3 +123,4 @@ async def test_openai_compat_passes_reasoning_effort_in_extra_body() -> None:
         "enable_thinking": True,
         "reasoning_effort": "low",
     }
+    assert prepared[0]["extra_body"] == captured["extra_body"]

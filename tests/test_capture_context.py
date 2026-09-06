@@ -1,4 +1,8 @@
-from lantu.client import _model_call_headers, model_call_context
+from lantu.client import (
+    _model_call_headers,
+    _record_prepared_request,
+    model_call_context,
+)
 
 
 def test_model_call_context_adds_and_clears_capture_headers(monkeypatch) -> None:
@@ -11,3 +15,15 @@ def test_model_call_context_adds_and_clears_capture_headers(monkeypatch) -> None
             "X-LANTU-Session-ID": "session_a",
         }
     assert _model_call_headers() == {}
+
+
+def test_model_call_context_reports_prepared_payload() -> None:
+    prepared: list[dict] = []
+    with model_call_context(
+        "call_1",
+        "session_a",
+        on_prepared=prepared.append,
+    ):
+        _record_prepared_request({"model": "glm", "messages": []})
+
+    assert prepared == [{"model": "glm", "messages": []}]

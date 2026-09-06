@@ -7,7 +7,8 @@ import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, AsyncIterator
+from dataclasses import dataclass
+from typing import Any, AsyncIterator, Callable
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
@@ -36,14 +37,28 @@ from lantu.tools.base import (
 # 由下一层 context window 解析逻辑接管。
 ANTHROPIC_MODEL_FETCH_TIMEOUT = 3.0
 
-_MODEL_CALL_CONTEXT: ContextVar[tuple[str, str | None] | None] = ContextVar(
+@dataclass(frozen=True)
+class _ModelCallContext:
+    model_call_id: str
+    session_id: str | None
+    on_prepared: Callable[[dict[str, Any]], None] | None = None
+
+
+_MODEL_CALL_CONTEXT: ContextVar[_ModelCallContext | None] = ContextVar(
     "lantu_model_call_context", default=None
 )
 
 
 @contextmanager
-def model_call_context(model_call_id: str, session_id: str | None = None):
-    token = _MODEL_CALL_CONTEXT.set((model_call_id, session_id))
+def model_call_context(
+    model_call_id: str,
+    session_id: str | None = None,
+    *,
+    on_prepared: Callable[[dict[str, Any]], None] | None = None,
+):
+    token = _MODEL_CALL_CONTEXT.set(
+        _ModelCallContext(model_call_id, session_id, on_prepared)
+    )
     try:
         yield
     finally:
@@ -56,11 +71,21 @@ def _model_call_headers() -> dict[str, str]:
     current = _MODEL_CALL_CONTEXT.get()
     if current is None:
         return {}
-    model_call_id, session_id = current
-    headers = {"X-LANTU-Model-Call-ID": model_call_id}
-    if session_id:
-        headers["X-LANTU-Session-ID"] = session_id
+    headers = {"X-LANTU-Model-Call-ID": current.model_call_id}
+    if current.session_id:
+        headers["X-LANTU-Session-ID"] = current.session_id
     return headers
+
+
+def _record_prepared_request(kwargs: dict[str, Any]) -> None:
+    current = _MODEL_CALL_CONTEXT.get()
+    if current is None or current.on_prepared is None:
+        return
+    try:
+        current.on_prepared(kwargs)
+    except Exception:
+        # Lens instrumentation must never prevent a model request.
+        return
 
 
 _EPHEMERAL = {"type": "ephemeral"}
@@ -272,6 +297,8 @@ class AnthropicClient(LLMClient):
                     "budget_tokens": max(self.max_output_tokens - 1, 1024),
                 }
 
+        _record_prepared_request(kwargs)
+
         current_tool_name = ""
         current_tool_id = ""
         json_accum = ""
@@ -429,6 +456,8 @@ class OpenAIClient(LLMClient):
             kwargs["instructions"] = system
         if tools:
             kwargs["tools"] = tools
+
+        _record_prepared_request(kwargs)
 
         current_tool_name = ""
         current_call_id = ""
@@ -601,6 +630,7 @@ class OpenAICompatClient(LLMClient):
                 "enable_thinking": True,
                 "reasoning_effort": self.reasoning_effort,
             }
+        _record_prepared_request(kwargs)
 
         # 用于累积 streaming tool call 的状态。Chat Completions 流按
         # tool_calls 列表中的位置索引下发 delta，我们按索引跟踪每个进行中的调用。

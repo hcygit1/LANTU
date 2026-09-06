@@ -15,6 +15,7 @@ from lantu.tools.lens.annotations import AnnotationStore
 from lantu.tools.lens.dataset import export_dataset
 from lantu.tools.lens.replay import ReplayPlan, ReplayResult, build_replay_plan, execute_capture_replay
 from lantu.tools.lens.capture import CaptureStore, EvidenceLink, correlate_evidence
+from lantu.tools.lens.cache import CacheReport, build_cache_report
 
 
 class LensReader:
@@ -60,6 +61,9 @@ class LensReader:
 
     def report(self, session_id: str) -> DiagnosisReport:
         return build_report(session_id, self.graphs(session_id))
+
+    def cache_report(self, session_id: str) -> CacheReport:
+        return build_cache_report(session_id, self.read(session_id))
 
     def action_graphs(self, session_id: str) -> list[ActionGraph]:
         return [build_action_graph(task) for task in self.tasks(session_id)]

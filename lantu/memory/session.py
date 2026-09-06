@@ -13,6 +13,7 @@ from typing import Any
 from lantu.conversation import (
     ConversationManager,
     Message,
+    MessageKind,
     ThinkingBlock,
     ToolResultBlock,
     ToolUseBlock,
@@ -392,10 +393,17 @@ def _message_payload(message: Message, message_id: str) -> dict[str, Any]:
     if message.reminder_key is not None:
         payload["reminder_key"] = message.reminder_key
         payload["reminder_hash"] = message.reminder_hash
+    payload["kind"] = getattr(message.kind, "value", str(message.kind))
+    if message.appendix_key is not None:
+        payload["appendix_key"] = message.appendix_key
     return payload
 
 
 def _message_from_payload(payload: dict[str, Any]) -> Message:
+    try:
+        kind = MessageKind(str(payload.get("kind", MessageKind.FROZEN.value)))
+    except ValueError:
+        kind = MessageKind.FROZEN
     return Message(
         role=str(payload.get("role", "user")),
         content=str(payload.get("content", "")),
@@ -433,6 +441,12 @@ def _message_from_payload(payload: dict[str, Any]) -> Message:
         reminder_hash=(
             str(payload["reminder_hash"])
             if payload.get("reminder_hash") is not None
+            else None
+        ),
+        kind=kind,
+        appendix_key=(
+            str(payload["appendix_key"])
+            if payload.get("appendix_key") is not None
             else None
         ),
     )
@@ -646,7 +660,10 @@ def _append_interruption_events(
 
 
 async def generate_session_summary(
-    client: Any, conversation: ConversationManager, protocol: str
+    client: Any,
+    conversation: ConversationManager,
+    protocol: str,
+    request_recorder: Any | None = None,
 ) -> str:
     from lantu.tools.base import StreamEnd, TextDelta
 
@@ -661,7 +678,17 @@ async def generate_session_summary(
     )
     collected = ""
     try:
-        async for event in client.stream(summary_conv, system=SESSION_SUMMARY_PROMPT):
+        stream = (
+            request_recorder.stream(
+                client,
+                summary_conv,
+                system=SESSION_SUMMARY_PROMPT,
+                call_kind="session_summary",
+            )
+            if request_recorder is not None
+            else client.stream(summary_conv, system=SESSION_SUMMARY_PROMPT)
+        )
+        async for event in stream:
             if isinstance(event, TextDelta):
                 collected += event.text
             elif isinstance(event, StreamEnd):

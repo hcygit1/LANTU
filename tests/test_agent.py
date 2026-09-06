@@ -1014,7 +1014,18 @@ async def test_run_records_model_usage_in_session():
 
     recorded = [event for event in session.events if event.event_type == "usage.recorded"]
     assert len(recorded) == 1
-    assert recorded[0].payload == {
+    payload = recorded[0].payload
+    assert {
+        key: payload[key]
+        for key in (
+            "provider",
+            "model",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_creation_tokens",
+        )
+    } == {
         "provider": "openai-compat",
         "model": "",
         "input_tokens": 10,
@@ -1022,6 +1033,10 @@ async def test_run_records_model_usage_in_session():
         "cache_read_tokens": 3,
         "cache_creation_tokens": 2,
     }
+    assert payload["model_call_id"]
+    assert payload["call_kind"] == "main"
+    assert payload["agent_id"] == agent.agent_id
+    assert payload["schema_epoch_id"]
     model_events = [
         event
         for event in session.events
@@ -1235,12 +1250,12 @@ async def test_message_splicing():
 
     # 检查对话历史
     msgs = build_anthropic_messages(conv.get_messages())
-    # env_context(user) 和 user_message 被合并为一条 → merged_user + assistant(text+2 个 tool_use) + user(2 个 tool_result) + assistant(最终响应)
-    assert len(msgs) == 4
-    assistant_msg = msgs[1]
+    # 运行时 appendix 作为尾部 user 消息追加；不再依赖固定 wire 消息总数。
+    assert len(msgs) >= 4
+    assistant_msg = next(msg for msg in msgs if msg.get("role") == "assistant" and msg.get("content") and any(item.get("type") == "tool_use" for item in msg["content"]))
     assert assistant_msg["role"] == "assistant"
     assert len(assistant_msg["content"]) == 3  # text + 2 个 tool_use
-    tool_results_msg = msgs[2]
+    tool_results_msg = next(msg for msg in msgs if msg.get("role") == "user" and isinstance(msg.get("content"), list) and any(item.get("type") == "tool_result" for item in msg["content"]))
     assert tool_results_msg["role"] == "user"
     assert len(tool_results_msg["content"]) == 2  # 2 个 tool_result
     assert tool_results_msg["content"][0]["tool_use_id"] == "t1"
