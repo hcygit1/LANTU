@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 
@@ -26,6 +27,14 @@ class ThinkingBlock:
     signature: str
 
 
+class MessageKind(StrEnum):
+    """Conversation lifecycle metadata; it does not affect wire serialization."""
+
+    FROZEN = "frozen"
+    APPENDIX = "appendix"
+    EPHEMERAL = "ephemeral"
+
+
 @dataclass
 class Message:
     role: str  # "user" | "assistant"
@@ -35,6 +44,8 @@ class Message:
     thinking_blocks: list[ThinkingBlock] = field(default_factory=list)
     reminder_key: str | None = None
     reminder_hash: str | None = None
+    kind: MessageKind = MessageKind.FROZEN
+    appendix_key: str | None = None
 
 
 # 估算最后一次 API 用量锚点之后追加的消息 token 开销时使用的字符/token 比率。
@@ -67,6 +78,7 @@ def estimate_tokens(messages: list[Message]) -> int:
 @dataclass
 class ConversationManager:
     history: list[Message] = field(default_factory=list)
+    ephemeral: list[Message] = field(default_factory=list, repr=False)
     env_injected: bool = field(default=False, init=False)
     ltm_injected: bool = field(default=False, init=False)
     # API 报告的每轮真实 prompt 大小，保留用于向后兼容。
@@ -123,12 +135,14 @@ class ConversationManager:
         这样在第一次 API 响应到来之前阈值检查依然能正常工作。
         """
         if self.baseline_tokens <= 0:
-            return estimate_tokens(self.history)
-        tail = self.history[self.anchor_count:]
+            return estimate_tokens(self.get_messages())
+        tail = [*self.history[self.anchor_count :], *self.ephemeral]
         return self.baseline_tokens + estimate_tokens(tail)
 
     def add_user_message(self, content: str) -> None:
-        self.history.append(Message(role="user", content=content))
+        self.history.append(
+            Message(role="user", content=content, kind=MessageKind.FROZEN)
+        )
 
     def add_assistant_message(
         self,
@@ -142,6 +156,7 @@ class ConversationManager:
                 content=content,
                 tool_uses=tool_uses or [],
                 thinking_blocks=thinking_blocks or [],
+                kind=MessageKind.FROZEN,
             )
         )
 
@@ -150,6 +165,7 @@ class ConversationManager:
         content: str,
         *,
         reminder_key: str | None = None,
+        kind: MessageKind = MessageKind.APPENDIX,
     ) -> bool:
         reminder_hash = (
             hashlib.sha256(content.encode("utf-8")).hexdigest()
@@ -168,6 +184,8 @@ class ConversationManager:
                 content=f"<system-reminder>\n{content}\n</system-reminder>",
                 reminder_key=reminder_key,
                 reminder_hash=reminder_hash,
+                kind=kind,
+                appendix_key=reminder_key if kind == MessageKind.APPENDIX else None,
             )
         )
         if reminder_key is not None and reminder_hash is not None:
@@ -176,13 +194,48 @@ class ConversationManager:
 
     def add_tool_results_message(self, tool_results: list[ToolResultBlock]) -> None:
         self.history.append(
-            Message(role="user", content="", tool_results=tool_results)
+            Message(
+                role="user",
+                content="",
+                tool_results=tool_results,
+                kind=MessageKind.FROZEN,
+            )
         )
+
+    def add_appendix(self, key: str, content: str) -> bool:
+        """Append a keyed runtime-state snapshot when its value changed."""
+        value_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if self._reminder_versions.get(key) == value_hash:
+            return False
+        self.history.append(
+            Message(
+                role="user",
+                content=content,
+                reminder_key=key,
+                reminder_hash=value_hash,
+                kind=MessageKind.APPENDIX,
+                appendix_key=key,
+            )
+        )
+        self._reminder_versions[key] = value_hash
+        return True
+
+    def add_ephemeral(self, content: str) -> None:
+        """Add request-only context without persisting it in conversation history."""
+        self.ephemeral.append(
+            Message(role="user", content=content, kind=MessageKind.EPHEMERAL)
+        )
+
+    def clear_ephemeral(self) -> None:
+        self.ephemeral.clear()
 
 
     def inject_environment(self, context: str) -> None:
         if not self.env_injected:
-            self.history.insert(0, Message(role="user", content=context))
+            self.history.insert(
+                0,
+                Message(role="user", content=context, kind=MessageKind.FROZEN),
+            )
             self.env_injected = True
 
     def inject_long_term_memory(
@@ -216,7 +269,10 @@ class ConversationManager:
             "</system-reminder>"
         )
         pos = 1 if self.env_injected else 0
-        self.history.insert(pos, Message(role="user", content=wrapped))
+        self.history.insert(
+            pos,
+            Message(role="user", content=wrapped, kind=MessageKind.FROZEN),
+        )
         self.ltm_injected = True
 
     def replace_history(self, new_messages: list[Message]) -> None:
@@ -233,4 +289,4 @@ class ConversationManager:
 
 
     def get_messages(self) -> list[Message]:
-        return list(self.history)
+        return [*self.history, *self.ephemeral]

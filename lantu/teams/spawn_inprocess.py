@@ -164,6 +164,7 @@ def spawn_inprocess_teammate(
         没有 mailbox 时退化为单次执行（向后兼容）。
         """
         try:
+            from lantu.conversation import MessageKind
             if conversation is not None:
                 conv = conversation
             else:
@@ -178,7 +179,10 @@ def spawn_inprocess_teammate(
                 if mailbox is not None:
                     reminder = _inject_pending_messages(mailbox, name)
                     if reminder:
-                        conv.add_system_reminder(reminder)
+                        conv.add_system_reminder(
+                            reminder,
+                            kind=MessageKind.FROZEN,
+                        )
 
                 # 执行一个完整的 agent turn
                 if next_prompt:
