@@ -18,6 +18,7 @@ def test_lens_web_reads_session_journal(tmp_path: Path) -> None:
     detail = client.get("/api/session/session_a").json()
     assert detail["events"][0]["type"] == "session.created"
     assert detail["actions"] == [{"task_id": "task_1", "graph": {"nodes": [], "edges": []}}]
+    assert detail["cache"] == {"session_id": "session_a", "calls": []}
 
 
 def test_lens_web_searches_all_sessions(tmp_path: Path) -> None:

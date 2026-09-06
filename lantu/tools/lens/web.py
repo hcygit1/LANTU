@@ -41,6 +41,7 @@ def create_lens_app(work_dir: str | Path) -> FastAPI:
             ],
             "diagnosis": reader.report(session_id).to_dict(),
             "evidence": [asdict(link) for link in reader.evidence_links(session_id)],
+            "cache": reader.cache_report(session_id).to_dict(),
         }
 
     @app.get("/api/search")

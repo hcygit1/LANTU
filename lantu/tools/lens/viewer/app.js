@@ -30,6 +30,7 @@ function renderTab(tab) {
   if (tab === 'events') renderEvents();
   if (tab === 'tasks') renderTasks();
   if (tab === 'actions') renderActions();
+  if (tab === 'cache') renderCache();
   if (tab === 'diagnosis') renderDiagnosis();
   if (tab === 'evidence') renderEvidence();
 }
@@ -42,6 +43,7 @@ function readableEvent(event) {
     'turn.completed': `Turn completed${p.iteration_count ? ` after ${p.iteration_count} iterations` : ''}`,
     'turn.interrupted': `Turn interrupted${p.reason ? `: ${p.reason}` : ''}`,
     'model.request.started': `Model request started${p.model ? ` · ${p.model}` : ''}`,
+    'model.request.prepared': `Model payload prepared${p.payload?.digest ? ` · ${p.payload.digest.slice(0, 8)}` : ''}`,
     'model.request.completed': `Model request completed${p.elapsed_ms != null ? ` in ${p.elapsed_ms} ms` : ''}`,
     'model.request.failed': `Model request failed${p.error?.message ? `: ${p.error.message}` : ''}`,
     'model.request.interrupted': 'Model request interrupted', 'usage.recorded': `Usage · ${p.input_tokens || 0} input / ${p.output_tokens || 0} output tokens`,
@@ -76,6 +78,20 @@ function renderTasks() {
 function renderActions() {
   const nodes = current.actions.flatMap(item => item.graph.nodes || []);
   $('panel').innerHTML = `<div class="view-toolbar"><div><h2>Actions</h2><span class="muted">Normalized action graph</span></div></div>${nodes.length ? `<div class="action-list">${nodes.map(node => `<article class="action"><div><span class="type">${esc(node.kind)}</span><span class="badge ${esc(node.status)}">${esc(node.status)}</span></div><strong>${esc(node.action_id)}</strong><span class="muted">Sequence #${node.start_sequence}${node.end_sequence !== node.start_sequence ? ` → #${node.end_sequence}` : ''}</span></article>`).join('')}</div>` : '<p class="muted">No actions detected.</p>'}`;
+}
+
+function cacheChangeLabel(change) {
+  return String(change || 'unknown').replaceAll('_', ' ');
+}
+
+function renderCache() {
+  const report = current.cache || { calls: [] };
+  const calls = report.calls || [];
+  const totalPrompt = calls.reduce((sum, call) => sum + (call.prompt_tokens || 0), 0);
+  const totalRead = calls.reduce((sum, call) => sum + (call.cache_read_tokens || 0), 0);
+  const changed = calls.filter(call => !['cold_start', 'unchanged', 'append_only'].includes(call.change)).length;
+  const hitRate = totalPrompt ? totalRead / totalPrompt : 0;
+  $('panel').innerHTML = `<div class="view-toolbar"><div><h2>Cache</h2><span class="muted">Prefix stability across model calls</span></div></div><div class="cache-stats"><div><span class="muted">Calls</span><strong>${calls.length}</strong></div><div><span class="muted">Hit rate</span><strong>${(hitRate * 100).toFixed(1)}%</strong></div><div><span class="muted">Cache read</span><strong>${totalRead.toLocaleString()}</strong></div><div><span class="muted">Changed calls</span><strong>${changed}</strong></div></div>${calls.length ? `<div class="cache-list">${calls.map(call => `<details class="cache-call"><summary><span class="seq">#${call.sequence}</span><span class="type">${esc(call.call_kind)}</span><span class="badge cache-${esc(call.change)}">${esc(cacheChangeLabel(call.change))}</span><span class="cache-rate">${((call.cache_hit_rate || 0) * 100).toFixed(1)}%</span></summary><div class="cache-detail"><div><span class="muted">Model</span><strong>${esc(call.provider)} / ${esc(call.model || 'unknown')}</strong></div><div><span class="muted">Common messages</span><strong>${call.common_message_count} (${(call.common_message_chars || 0).toLocaleString()} chars)</strong></div><div><span class="muted">First divergence</span><strong>${call.first_divergence_message == null ? 'None' : `Message #${call.first_divergence_message}`}</strong></div><div><span class="muted">Tokens</span><strong>${(call.prompt_tokens || 0).toLocaleString()} prompt · ${(call.cache_read_tokens || 0).toLocaleString()} cached · ${(call.cache_creation_tokens || 0).toLocaleString()} created</strong></div><div><span class="muted">Call ID</span><code>${esc(call.model_call_id)}</code></div></div></details>`).join('')}</div>` : '<p class="muted">No model cache data recorded.</p>'}`;
 }
 
 function renderDiagnosis() {

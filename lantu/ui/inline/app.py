@@ -20,7 +20,7 @@ from lantu.agent import (
 from lantu.agents.notification import inject_task_notifications
 from lantu.client import LLMError
 from lantu.commands import CommandContext
-from lantu.conversation import ConversationManager, Message
+from lantu.conversation import ConversationManager, Message, MessageKind
 from lantu.filehistory import FileHistory
 from lantu.permissions import PermissionMode
 from lantu.prompts import build_plan_mode_exit_reminder
@@ -423,7 +423,10 @@ class InlineApp:
             drain_mailbox = self.runtime.team_manager.drain_lead_mailbox
             notes = drain_mailbox()
             for note in notes:
-                self.runtime.conversation.add_system_reminder(note)
+                self.runtime.conversation.add_system_reminder(
+                    note,
+                    kind=MessageKind.FROZEN,
+                )
 
             if completed or notes:
                 self._pending_session_messages.extend(
@@ -579,6 +582,10 @@ class InlineApp:
 
     def _set_session(self, session: Any) -> None:
         self.runtime.session = session
+        self.agent.session = session
+        request_recorder = getattr(self.agent, "request_recorder", None)
+        if request_recorder is not None:
+            request_recorder.session = session
         self.agent.session_id = session.session_id
         recall_task = self.agent.memory_recall_task
         if recall_task is not None and not recall_task.done():

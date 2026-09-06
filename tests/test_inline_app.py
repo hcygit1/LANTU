@@ -1471,6 +1471,7 @@ async def test_command_context_syncs_runtime_references_and_restores_messages(
     )
 
     assert runtime.session is new_session
+    assert runtime.agent.session is new_session
     assert runtime.agent.session_id == "session-2"
     assert runtime.conversation is new_conversation
     assert transcript.user_messages == ["question"]
