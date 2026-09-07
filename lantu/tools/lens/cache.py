@@ -22,17 +22,22 @@ class CacheCall:
     cache_read_tokens: int
     cache_creation_tokens: int
     cache_hit_rate: float
+    first_divergence_kind: str | None = None
+    first_divergence_appendix_key: str | None = None
+    message_kind_counts: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
 class CacheReport:
     session_id: str
     calls: tuple[CacheCall, ...]
+    breakpoints_by_kind: dict[str, int] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "calls": [asdict(call) for call in self.calls],
+            "breakpoints_by_kind": self.breakpoints_by_kind or {},
         }
 
     def render_text(self) -> str:
@@ -78,6 +83,7 @@ def build_cache_report(
         tuple[int, RequestFingerprint, RequestFingerprint | None, int],
     ] = {}
     calls: list[CacheCall] = []
+    breakpoints_by_kind: dict[str, int] = {}
     for call_id in order:
         record = by_call[call_id]
         started = record.get("started")
@@ -116,6 +122,8 @@ def build_cache_report(
         common_count = 0
         common_chars = 0
         divergence: int | None = None
+        divergence_kind: str | None = None
+        divergence_appendix_key: str | None = None
         if previous is not None:
             previous_sequence, previous_assembly, previous_payload, previous_cache_read = previous
             comparison = compare_fingerprints(previous_assembly, assembly)
@@ -123,6 +131,14 @@ def build_cache_report(
             common_count = comparison.common_message_count
             common_chars = comparison.common_message_chars
             divergence = comparison.first_divergence_message
+            if divergence is not None:
+                candidates = (assembly.messages, previous_assembly.messages)
+                for items in candidates:
+                    if divergence < len(items):
+                        item = items[divergence]
+                        divergence_kind = item.kind
+                        divergence_appendix_key = item.appendix_key
+                        break
             if previous_payload is not None and payload_fingerprint is not None:
                 payload_comparison = compare_fingerprints(
                     previous_payload,
@@ -134,6 +150,10 @@ def build_cache_report(
                 ):
                     change = "client_serialization_changed"
                     divergence = payload_comparison.first_divergence_message
+                    if divergence is not None and divergence < len(payload_fingerprint.messages):
+                        item = payload_fingerprint.messages[divergence]
+                        divergence_kind = item.kind
+                        divergence_appendix_key = item.appendix_key
             if (
                 change == "history_rewritten"
                 and any(previous_sequence < seq < started.sequence for seq in compact_sequences)
@@ -149,6 +169,12 @@ def build_cache_report(
         ):
             change = "provider_miss_candidate"
 
+        kind_counts: dict[str, int] = {}
+        for item in assembly.messages:
+            kind_counts[item.kind] = kind_counts.get(item.kind, 0) + 1
+        if divergence_kind is not None and change not in {"unchanged", "append_only", "cold_start"}:
+            breakpoints_by_kind[divergence_kind] = breakpoints_by_kind.get(divergence_kind, 0) + 1
+
         calls.append(
             CacheCall(
                 sequence=started.sequence,
@@ -160,6 +186,9 @@ def build_cache_report(
                 common_message_count=common_count,
                 common_message_chars=common_chars,
                 first_divergence_message=divergence,
+                first_divergence_kind=divergence_kind,
+                first_divergence_appendix_key=divergence_appendix_key,
+                message_kind_counts=kind_counts,
                 prompt_tokens=prompt_tokens,
                 cache_read_tokens=cache_read,
                 cache_creation_tokens=cache_creation,
@@ -173,4 +202,8 @@ def build_cache_report(
             cache_read,
         )
 
-    return CacheReport(session_id=session_id, calls=tuple(calls))
+    return CacheReport(
+        session_id=session_id,
+        calls=tuple(calls),
+        breakpoints_by_kind=breakpoints_by_kind,
+    )
