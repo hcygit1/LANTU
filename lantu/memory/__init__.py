@@ -14,6 +14,7 @@ from lantu.memory.instructions import load_instructions, process_includes
 from lantu.memory.recall import (
     RelevantMemory,
     find_relevant_memories,
+    render_memory_appendix,
     render_reminder,
 )
 from lantu.memory.session import (
@@ -51,5 +52,6 @@ __all__ = [
     "parse_frontmatter",
     "process_includes",
     "render_reminder",
+    "render_memory_appendix",
 ]
 

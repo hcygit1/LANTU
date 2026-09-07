@@ -425,6 +425,8 @@ class MemoryManager:
         prompt = (
             f"Analyze the conversation below and extract memories worth saving.\n\n"
             f"For each memory, output in this exact format:\n"
+            f"MEMORY_ACTION: <create|update>\n"
+            f"MEMORY_TARGET: <existing filename when action is update, otherwise empty>\n"
             f"MEMORY_NAME: <kebab-case-name>\n"
             f"MEMORY_TYPE: <user|feedback|project|reference>\n"
             f"MEMORY_DESC: <one-line description>\n"
@@ -473,6 +475,10 @@ class MemoryManager:
 
         blocks = [b for b in collected.split("---") if "MEMORY_NAME:" in b]
         for block in blocks:
+            action = _extract_field(block, "MEMORY_ACTION").lower() or "create"
+            target = _extract_field(block, "MEMORY_TARGET")
+            if action not in {"create", "update"}:
+                continue
             name = _extract_field(block, "MEMORY_NAME")
             mtype = _extract_field(block, "MEMORY_TYPE") or "reference"
             desc = _extract_field(block, "MEMORY_DESC")
@@ -488,8 +494,34 @@ class MemoryManager:
                 continue
             ensure_memory_dir_exists(target_dir)
 
-            content = f"---\nname: {name}\ndescription: {desc}\nmetadata:\n  type: {mtype}\n---\n\n{body}\n"
-            file_path = Path(target_dir) / f"{name}.md"
+            # Updates may only target an existing file inside one of the two
+            # memory roots. Never accept an arbitrary path from model output.
+            file_path: Path | None = None
+            if action == "update" and target:
+                target_name = Path(target).name
+                if not target_name.endswith(".md"):
+                    target_name += ".md"
+                for root in (self._user_mem_dir, self._mem_dir):
+                    if not root:
+                        continue
+                    candidate = Path(root) / target_name
+                    if candidate.is_file():
+                        file_path = candidate
+                        break
+
+            if file_path is None:
+                safe_name = Path(name).name
+                if safe_name != name or not safe_name or safe_name in {".", ".."}:
+                    continue
+                if not safe_name.endswith(".md"):
+                    safe_name += ".md"
+                file_path = Path(target_dir) / safe_name
+
+            # An update keeps the existing file's scope and index location.
+            target_dir = str(file_path.parent) + os.sep
+
+            stored_name = file_path.stem
+            content = f"---\nname: {stored_name}\ndescription: {desc}\nmetadata:\n  type: {mtype}\n---\n\n{body}\n"
             try:
                 file_path.write_text(content, encoding="utf-8")
             except OSError:
@@ -497,11 +529,13 @@ class MemoryManager:
 
             # 更新 MEMORY.md 索引
             idx_path = Path(target_dir) / ENTRYPOINT_NAME
-            idx_line = f"- [{name}]({name}.md) — {desc}\n"
+            idx_line = f"- [{stored_name}]({file_path.name}) — {desc}\n"
             try:
                 existing = idx_path.read_text(encoding="utf-8") if idx_path.exists() else ""
-                if f"{name}.md" not in existing:
-                    idx_path.write_text(existing + idx_line, encoding="utf-8")
+                lines = existing.splitlines(keepends=True)
+                marker = f"]({file_path.name})"
+                lines = [line for line in lines if marker not in line]
+                idx_path.write_text("".join(lines) + idx_line, encoding="utf-8")
             except OSError:
                 pass
 

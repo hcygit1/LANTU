@@ -62,6 +62,26 @@ class MemoryHeader:
 class RelevantMemory:
     path: str
     mtime_ms: int
+    filename: str = ""
+    name: str = ""
+    description: str = ""
+    scope: str = ""
+
+
+def render_memory_appendix(memory: RelevantMemory) -> str:
+    """Render one selected memory's stable summary for an Appendix block."""
+    title = memory.name or Path(memory.filename or memory.path).stem
+    filename = memory.filename or Path(memory.path).name
+    scope = memory.scope or "unknown"
+    note = memory_freshness_text(memory.mtime_ms)
+    parts = [
+        f'<memory name="{title}" file="{filename}" scope="{scope}">',
+        f"Summary: {memory.description or 'No summary available.'}",
+    ]
+    if note:
+        parts.append(note)
+    parts.append("</memory>")
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +247,21 @@ def format_memory_manifest(memories: list[MemoryHeader]) -> str:
     return "\n".join(lines)
 
 
+def _prefilter_memories(query: str, memories: list[MemoryHeader]) -> list[MemoryHeader]:
+    """Cheap candidate reduction; relevance is still decided by the selector."""
+    terms = [item.casefold() for item in re.findall(r"[\w./-]+", query, re.UNICODE) if item.strip()]
+    if not terms:
+        return memories
+    matched: list[MemoryHeader] = []
+    for memory in memories:
+        haystack = " ".join(
+            (memory.filename, Path(memory.filename).stem, memory.description, memory.type)
+        ).casefold()
+        if any(term in haystack for term in terms):
+            matched.append(memory)
+    return matched
+
+
 # ---------------------------------------------------------------------------
 # Find relevant memories
 # ---------------------------------------------------------------------------
@@ -253,6 +288,7 @@ async def find_relevant_memories(
 
     surfaced = already_surfaced or set()
     candidates = [m for m in all_headers if m.file_path not in surfaced]
+    candidates = _prefilter_memories(query, candidates)
     if not candidates:
         return []
 
@@ -270,7 +306,16 @@ async def find_relevant_memories(
     for fn in selected_filenames:
         m = by_key.get(fn)
         if m is not None:
-            result.append(RelevantMemory(path=m.file_path, mtime_ms=m.mtime_ms))
+            result.append(
+                RelevantMemory(
+                    path=m.file_path,
+                    mtime_ms=m.mtime_ms,
+                    filename=m.filename,
+                    name=Path(m.filename).stem,
+                    description=m.description,
+                    scope=m.scope,
+                )
+            )
     return result
 
 
@@ -282,6 +327,7 @@ async def _select_relevant_memories(
 ) -> list[str]:
     """Format manifest, call selector, parse JSON, return valid filenames."""
     valid_filenames = {m.filename for m in memories}
+    valid_paths = {m.file_path for m in memories}
 
     manifest = format_memory_manifest(memories)
 
@@ -305,7 +351,10 @@ async def _select_relevant_memories(
         arr = parsed.get("selected_memories", [])
         if not isinstance(arr, list):
             return []
-        return [f for f in arr if isinstance(f, str) and f in valid_filenames]
+        return [
+            f for f in arr
+            if isinstance(f, str) and (f in valid_filenames or f in valid_paths)
+        ]
     except (json.JSONDecodeError, AttributeError):
         return []
 
@@ -331,23 +380,21 @@ def _extract_json_object(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 def render_reminder(memories: list[RelevantMemory]) -> str:
-    """Read each selected memory file's full content and format a single
-    system-reminder body with freshness headers.
-    """
+    """Render selected memory headers only; full content is loaded on demand."""
     if not memories:
         return ""
 
     parts: list[str] = []
-    parts.append("The following relevant memories from prior conversations may help:\n")
+    parts.append(
+        "The following relevant memories may help. Use memory_search to read "
+        "the full content of a memory when its details are needed:\n"
+    )
     for mem in memories:
-        try:
-            content = Path(mem.path).read_text(encoding="utf-8")
-        except OSError:
-            continue  # skip unreadable files
-        basename = Path(mem.path).name
-        parts.append(f"## Memory: {basename} (saved {memory_age(mem.mtime_ms)})\n")
+        basename = mem.filename or Path(mem.path).name
+        title = mem.name or Path(basename).stem
+        parts.append(f"## Memory: {title} ({basename}, {mem.scope}-scope)\n")
         note = memory_freshness_text(mem.mtime_ms)
         if note:
             parts.append(note + "\n")
-        parts.append(content + "\n\n---\n")
+        parts.append(f"Summary: {mem.description or 'No summary available.'}\n\n---\n")
     return "\n".join(parts)
