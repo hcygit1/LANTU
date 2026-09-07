@@ -146,6 +146,17 @@ Match responses to the task: a simple question gets a direct answer, not headers
 In code: default to writing no comments. Never write multi-paragraph docstrings or multi-line comment blocks — one short line max. Don't create planning, decision, or analysis documents unless the user asks for them — work from conversation context, not intermediate files.""",
 )
 
+DYNAMIC_CONTEXT_SECTION = PromptSection(
+    name="DynamicContext",
+    priority=70,
+    content=(
+        "Dynamic context updates are cumulative. Each <appendix key=...> block "
+        "is a named state value: a later block with the same key replaces the "
+        "earlier value, while a key omitted from an update keeps its previous value. "
+        "The first update is a baseline; later updates contain only changed blocks."
+    ),
+)
+
 
 # ---------------------------------------------------------------------------
 # Plan 模式提示语（对应 Go 版 plan_mode.go）
@@ -266,6 +277,7 @@ def build_system_prompt(
     b.add(USING_TOOLS_SECTION)
     b.add(TONE_STYLE_SECTION)
     b.add(TEXT_OUTPUT_SECTION)
+    b.add(DYNAMIC_CONTEXT_SECTION)
     return b.build()
 
 

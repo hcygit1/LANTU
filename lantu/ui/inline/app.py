@@ -279,9 +279,9 @@ class InlineApp:
                 self.runtime.session.append(Message(role="user", content=text))
 
             if self.runtime.mcp_instructions:
-                self.runtime.conversation.add_system_reminder(
-                    self.runtime.mcp_instructions,
-                    reminder_key="mcp_instructions",
+                self.runtime.conversation.set_appendix_block(
+                    key="mcp_instructions",
+                    content=self.runtime.mcp_instructions,
                 )
 
             if prefetch_task is not None:

@@ -12,7 +12,7 @@ from lantu.commands.handlers.skill_register import register_skill_commands
 from lantu.conversation import ConversationManager, Message
 from lantu.hooks import HookContext
 from lantu.mcp import ConnectResult, MCPManager
-from lantu.memory import find_relevant_memories, render_reminder
+from lantu.memory import RelevantMemory, find_relevant_memories
 from lantu.permissions import PathSandbox
 
 from lantu.runtime.models import InteractiveRuntime
@@ -115,7 +115,7 @@ def refresh_runtime_skills(runtime: InteractiveRuntime) -> None:
 
 async def prefetch_runtime_memories(
     runtime: InteractiveRuntime, query: str
-) -> str:
+) -> list[RelevantMemory]:
     provider = runtime.provider
 
     async def selector(system_prompt: str, user_message: str) -> str:
@@ -155,11 +155,11 @@ async def prefetch_runtime_memories(
             ),
             timeout=MEMORY_PREFETCH_TIMEOUT,
         )
-        return render_reminder(results)
+        return results or []
     except asyncio.CancelledError:
         raise
     except (asyncio.TimeoutError, Exception):
-        return ""
+        return []
 
 
 def _consume_task_result(task: asyncio.Task[Any]) -> None:

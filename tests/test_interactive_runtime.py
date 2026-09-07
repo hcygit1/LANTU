@@ -215,9 +215,7 @@ async def test_prefetch_memories_uses_fresh_client_and_renders_result(
         return ["memory-result"]
 
     monkeypatch.setattr(lifecycle, "find_relevant_memories", find_memories)
-    monkeypatch.setattr(lifecycle, "render_reminder", lambda results: f"rendered:{results[0]}")
-
-    assert await runtime.prefetch_relevant_memories("query") == "rendered:memory-result"
+    assert await runtime.prefetch_relevant_memories("query") == ["memory-result"]
     assert side_client.close_calls == 1
     await runtime.close()
 
@@ -725,7 +723,7 @@ async def test_prefetch_closes_side_client_on_failure(
 
     assert await asyncio.wait_for(
         runtime.prefetch_relevant_memories("query"), timeout=0.2
-    ) == ""
+    ) == []
     assert side_client.close_calls == 1
     await runtime.close()
 

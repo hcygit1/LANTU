@@ -39,6 +39,7 @@ from lantu.tools.enter_worktree import EnterWorktreeTool
 from lantu.tools.exit_plan_mode import ExitPlanModeTool
 from lantu.tools.exit_worktree import ExitWorktreeTool
 from lantu.tools.impl.tool_search import ToolSearchTool
+from lantu.tools.impl.memory_search import MemorySearchTool
 from lantu.tools.install_skill import InstallSkillTool
 from lantu.tools.load_skill import LoadSkill
 from lantu.tools.synthetic_output import SyntheticOutputTool
@@ -226,6 +227,12 @@ def _register_skills(runtime: InteractiveRuntime) -> None:
     runtime.registry.register(install_skill_tool)
     runtime.registry.register(
         ToolSearchTool(runtime.registry, protocol=runtime.provider.protocol)
+    )
+    runtime.registry.register(
+        MemorySearchTool(
+            runtime.memory_manager.user_mem_dir,
+            runtime.memory_manager.project_mem_dir,
+        )
     )
     runtime.registry.register(AskUserTool())
     runtime.registry.register(exit_plan_mode_tool)

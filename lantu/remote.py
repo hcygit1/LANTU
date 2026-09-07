@@ -381,9 +381,9 @@ class RemoteServer:
 
         # 每轮经过 ConversationManager 去重；压缩删除后可在下一轮重新注入。
         if self._mcp_instructions:
-            self.conversation.add_system_reminder(
-                self._mcp_instructions,
-                reminder_key="mcp_instructions",
+            self.conversation.set_appendix_block(
+                key="mcp_instructions",
+                content=self._mcp_instructions,
             )
 
         # 创建取消事件

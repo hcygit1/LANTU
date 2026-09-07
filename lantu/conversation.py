@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -95,6 +96,9 @@ class ConversationManager:
         init=False,
         repr=False,
     )
+    _pending_appendix: dict[str, str] = field(default_factory=dict, init=False, repr=False)
+    _appendix_seq: int = field(default=0, init=False, repr=False)
+    _appendix_baseline_sent: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._rebuild_reminder_versions()
@@ -104,6 +108,19 @@ class ConversationManager:
         for message in self.history:
             if message.reminder_key and message.reminder_hash:
                 self._reminder_versions[message.reminder_key] = message.reminder_hash
+            if message.appendix_key == "context-update":
+                match = re.search(r'<context-update seq="(\d+)"', message.content)
+                if match:
+                    self._appendix_seq = max(self._appendix_seq, int(match.group(1)))
+                for block in re.finditer(
+                    r'<appendix key="([^"]+)">\n(.*?)\n</appendix>',
+                    message.content,
+                    re.DOTALL,
+                ):
+                    self._reminder_versions[block.group(1)] = hashlib.sha256(
+                        block.group(2).encode("utf-8")
+                    ).hexdigest()
+                self._appendix_baseline_sent = True
 
     def record_usage_anchor(
         self,
@@ -219,6 +236,63 @@ class ConversationManager:
         )
         self._reminder_versions[key] = value_hash
         return True
+
+    def set_appendix_block(self, key: str, content: str) -> None:
+        """Stage one dynamic block for the next unified context update."""
+        self._pending_appendix[key] = content
+
+    def flush_appendix(self) -> bool:
+        """Append one context-update message containing changed blocks only."""
+        if not self._pending_appendix:
+            return False
+
+        changed: list[tuple[str, str, str]] = []
+        for key, content in self._pending_appendix.items():
+            value_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if self._reminder_versions.get(key) == value_hash:
+                continue
+            changed.append((key, content, value_hash))
+        self._pending_appendix.clear()
+        if not changed:
+            return False
+
+        self._appendix_seq += 1
+        mode = "delta" if self._appendix_baseline_sent else "baseline"
+        blocks = "\n\n".join(
+            f'<appendix key="{key}">\n{content}\n</appendix>'
+            for key, content, _ in changed
+        )
+        body = (
+            f'<context-update seq="{self._appendix_seq}" mode="{mode}">\n'
+            f"{blocks}\n</context-update>"
+        )
+        self.history.append(
+            Message(
+                role="user",
+                content=body,
+                reminder_key="context-update",
+                reminder_hash=hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                kind=MessageKind.APPENDIX,
+                appendix_key="context-update",
+            )
+        )
+        for key, _, value_hash in changed:
+            self._reminder_versions[key] = value_hash
+        self._appendix_baseline_sent = True
+        return True
+
+    def reset_appendix_baseline(self) -> None:
+        """Forget dynamic block versions after history compaction."""
+        self._pending_appendix.clear()
+        self._appendix_seq = 0
+        self._appendix_baseline_sent = False
+        self._reminder_versions = {
+            message.reminder_key: message.reminder_hash
+            for message in self.history
+            if message.kind != MessageKind.APPENDIX
+            and message.reminder_key
+            and message.reminder_hash
+        }
 
     def add_ephemeral(self, content: str) -> None:
         """Add request-only context without persisting it in conversation history."""

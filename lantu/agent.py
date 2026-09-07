@@ -32,6 +32,7 @@ from lantu.conversation import ThinkingBlock as ConvThinkingBlock
 from lantu.context.repo_map import RepoMap, RepoMapSnapshot
 from lantu.memory.auto_memory import MemoryManager
 from lantu.memory.file_ledger import FileLedger
+from lantu.memory.recall import render_memory_appendix
 from lantu.permissions import (
     Decision,
     PermissionChecker,
@@ -486,9 +487,9 @@ class Agent:
         if not self.hook_engine:
             return
         for prompt in self.hook_engine.drain_prompt_messages():
-            conversation.add_system_reminder(
-                f"Hook injected context:\n{prompt.content}",
-                reminder_key=f"hook:{prompt.hook_id}:{prompt.event}",
+            conversation.set_appendix_block(
+                key=f"hook:{prompt.hook_id}:{prompt.event}",
+                content=f"Hook injected context:\n{prompt.content}",
             )
 
     def _build_hook_context(self, event: str, **kwargs: str | dict) -> HookContext:
@@ -532,14 +533,14 @@ class Agent:
             git_status = result.stdout.strip() if result.returncode == 0 else "unavailable"
         except (OSError, subprocess.SubprocessError):
             git_status = "unavailable"
-        conversation.add_appendix(
+        conversation.set_appendix_block(
             "git_status",
             "<runtime-state key=\"git_status\">\n"
             + (git_status or "clean")
             + "\n</runtime-state>",
         )
         plan_state = "planning" if self.plan_mode else "normal"
-        conversation.add_appendix(
+        conversation.set_appendix_block(
             "task_progress",
             f"<runtime-state key=\"task_progress\">iteration={iteration}; "
             f"plan_mode={plan_state}</runtime-state>",
@@ -609,9 +610,9 @@ class Agent:
                 plan_reminder = build_plan_mode_reminder(
                     plan_path, plan_exists, iteration
                 )
-                conversation.add_system_reminder(
-                    plan_reminder,
-                    reminder_key="plan_mode",
+                conversation.set_appendix_block(
+                    key="plan_mode",
+                    content=plan_reminder,
                 )
 
             if self.hook_engine:
@@ -622,15 +623,16 @@ class Agent:
 
             deferred_names = self.registry.get_deferred_tool_names()
             if deferred_names:
-                conversation.add_system_reminder(
-                    "The following deferred tools are available via ToolSearch. "
+                conversation.set_appendix_block(
+                    key="deferred_tools",
+                    content="The following deferred tools are available via ToolSearch. "
                     "Their schemas are NOT loaded - use ToolSearch with "
                     'query "select:<name>[,<name>...]" to load tool schemas before calling them:\n'
                     + "\n".join(deferred_names),
-                    reminder_key="deferred_tools",
                 )
 
             tools = self.registry.get_all_schemas(self.protocol)
+            conversation.flush_appendix()
 
             # 接近 context window 上限时自动 compact
             compact_result = await auto_compact(
@@ -886,11 +888,12 @@ class Agent:
             if self.memory_recall_task and not self._memory_recall_consumed:
                 if self.memory_recall_task.done():
                     try:
-                        recall = self.memory_recall_task.result()
-                        if recall:
-                            conversation.add_system_reminder(
-                                recall,
-                                reminder_key="memory_recall",
+                        memories = self.memory_recall_task.result()
+                        for memory in memories:
+                            key = f"memory:{memory.scope}:{memory.filename}"
+                            conversation.set_appendix_block(
+                                key=key,
+                                content=render_memory_appendix(memory),
                             )
                     except Exception:
                         pass

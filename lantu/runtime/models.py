@@ -77,7 +77,7 @@ class InteractiveRuntime:
         except Exception as exc:
             self.startup_messages.append(f"MCP warning: {exc}")
 
-    async def prefetch_relevant_memories(self, query: str) -> str:
+    async def prefetch_relevant_memories(self, query: str) -> list[Any]:
         from lantu.runtime.lifecycle import prefetch_runtime_memories
 
         return await prefetch_runtime_memories(self, query)
