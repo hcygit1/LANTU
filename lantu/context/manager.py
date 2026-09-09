@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -73,6 +74,7 @@ class CompactBoundary:
 
     summary: str
     keep: list[Message]
+    artifact_refs: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -81,6 +83,140 @@ class CompactEvent:
     # 摘要成功时填充，调用方可据此持久化 compact_boundary 记录。
     # 未产出摘要时为 None。
     boundary: CompactBoundary | None = None
+    action: str = "structured_summary"
+    tool_result_replacements: list[dict[str, str]] = field(default_factory=list)
+    # 压缩前的上下文压力快照。第一阶段只提供诊断依据，不改变压缩行为。
+    pressure: ContextPressureReport | None = None
+
+
+@dataclass(frozen=True)
+class ContextPressureReport:
+    """Describe what currently occupies the context window.
+
+    This is deliberately a pure diagnostic value. ``auto_compact`` still uses
+    its existing full-summary path; a later policy layer can consume
+    ``recommended_action`` without repeating the accounting rules.
+    """
+
+    current_tokens: int
+    context_window: int
+    usage_ratio: float
+    pressure_level: str  # ``none``, ``soft`` or ``hard``
+    keep_start: int
+    stale_tool_tokens: int
+    old_conversation_tokens: int
+    recent_tokens: int
+    existing_summary_tokens: int
+    dominant_source: str
+    recommended_action: str
+
+
+class CompactionPolicy:
+    """Choose the least disruptive response to a pressure snapshot.
+
+    The policy is intentionally pure.  It does not rewrite messages; callers
+    decide when and how to execute the returned action.
+    """
+
+    NONE = "none"
+    DEFER = "defer"
+    COMPACT_STALE_TOOLS = "compact_stale_tools"
+    STRUCTURED_SUMMARY = "structured_summary"
+    WINDOW_ROLLOVER = "window_rollover"
+
+    @classmethod
+    def decide(
+        cls,
+        report: ContextPressureReport,
+        *,
+        at_user_boundary: bool = True,
+        cache_healthy: bool = True,
+    ) -> str:
+        """Return an action without mutating the conversation.
+
+        Soft pressure is delayed while the prefix cache is healthy.  A local
+        stale-tool eviction is safe to do at a user boundary; in the middle of
+        a tool chain it is deferred.  Hard pressure requires a full summary,
+        unless the working view already contains a previous summary, in which
+        case the caller should consider a new window.
+        """
+        if report.pressure_level == "none":
+            return cls.NONE
+
+        if not at_user_boundary:
+            return cls.DEFER
+
+        if report.pressure_level == "hard" and report.existing_summary_tokens > 0:
+            return cls.WINDOW_ROLLOVER
+
+        if report.recommended_action == cls.COMPACT_STALE_TOOLS:
+            return cls.COMPACT_STALE_TOOLS
+
+        if report.pressure_level == "soft" and cache_healthy:
+            return cls.DEFER
+
+        return cls.STRUCTURED_SUMMARY
+
+
+def compact_stale_tool_results(
+    messages: list[Message],
+    keep_start: int,
+    session_dir: Path,
+) -> list[Message]:
+    """Evict old tool previews while keeping their full artifacts recoverable.
+
+    Only messages before ``keep_start`` are eligible. Existing persisted
+    previews are reduced to a reference; an unexpectedly large raw result is
+    persisted first and then reduced. Small inline results and all recent
+    messages are left byte-for-byte untouched.
+    """
+    if keep_start <= 0:
+        return list(messages)
+
+    path_pattern = re.compile(r"完整内容已保存到：\n([^\n]+)")
+    compacted: list[Message] = []
+    changed_any = False
+    for index, message in enumerate(messages):
+        if index >= keep_start or not message.tool_results:
+            compacted.append(message)
+            continue
+
+        changed = False
+        results: list[ToolResultBlock] = []
+        for result in message.tool_results:
+            content = result.content
+            artifact_path: Path | None = None
+            if PERSISTED_TAG in content:
+                match = path_pattern.search(content)
+                if match:
+                    candidate = Path(match.group(1).strip())
+                    if candidate.is_file():
+                        artifact_path = candidate
+            elif len(content) > TOOL_RESULT_INLINE_CHAR_LIMIT:
+                candidate = persist_tool_result(result.tool_use_id, content, session_dir)
+                if candidate.is_file():
+                    artifact_path = candidate
+
+            if artifact_path is not None:
+                reference = make_persisted_reference(artifact_path)
+                if reference != content:
+                    content = reference
+                    changed = True
+            results.append(
+                ToolResultBlock(
+                    tool_use_id=result.tool_use_id,
+                    content=content,
+                    is_error=result.is_error,
+                )
+            )
+
+        if changed:
+            compacted.append(replace(message, tool_results=results))
+            changed_any = True
+        else:
+            compacted.append(message)
+
+    return compacted if changed_any else list(messages)
 
 
 @dataclass(frozen=True)
@@ -535,6 +671,54 @@ def build_compact_messages(
     ]
 
 
+def build_window_rollover_messages(
+    summary: str,
+    *,
+    artifact_refs: list[str] | None = None,
+    attachment: str = "",
+    has_keep_tail: bool = False,
+    transcript_path: str = "",
+) -> list[Message]:
+    """Build the first durable message of a new Conversation window."""
+    content = (
+        "本次会话已在同一个 Session 内切换到新的上下文窗口。"
+        "旧窗口仍完整保存在 Journal 中，以下是继续当前任务所需的交接摘要：\n\n"
+        + summary
+    )
+    if artifact_refs:
+        content += (
+            "\n\n## 历史工具结果索引\n"
+            "以下文件仍由 Session 保留；需要原始结果时请重新使用读取或搜索工具：\n"
+            + "\n".join(f"- {path}" for path in artifact_refs)
+        )
+    if has_keep_tail:
+        content += "\n\n当前窗口的近期消息已原样保留。"
+    if transcript_path:
+        content += (
+            "\n\n如需核对旧窗口中的用户原话或工具调用链，请用 ReadFile 读取完整会话记录："
+            + transcript_path
+        )
+    if attachment:
+        content += "\n\n---\n\n" + attachment
+    return [Message(role="user", content=content)]
+
+
+def _persisted_artifact_refs(messages: list[Message]) -> list[str]:
+    """Collect stable artifact paths without retaining tool-result bodies."""
+    pattern = re.compile(r"完整内容已保存到：\n([^\n]+)")
+    refs: list[str] = []
+    seen: set[str] = set()
+    for message in messages:
+        values = [message.content, *(result.content for result in message.tool_results)]
+        for value in values:
+            for match in pattern.finditer(value):
+                path = match.group(1).strip()
+                if path and path not in seen:
+                    seen.add(path)
+                    refs.append(path)
+    return refs
+
+
 # ---------------------------------------------------------------------------
 # 压缩后恢复状态
 # ---------------------------------------------------------------------------
@@ -788,6 +972,91 @@ def _prefix_too_small_to_compact(prefix: list[Message]) -> bool:
     return estimate_tokens(prefix) < MIN_SUMMARIZE_PREFIX_TOKENS
 
 
+_COMPACT_SUMMARY_MARKER = "本次会话延续自之前的对话，因上下文空间不足进行了压缩。"
+
+
+def _tool_result_tokens(messages: list[Message]) -> int:
+    """Estimate only tool-result payloads, excluding their containing messages."""
+    result_only_messages = [
+        Message(role="user", content="", tool_results=list(message.tool_results))
+        for message in messages
+        if message.tool_results
+    ]
+    return estimate_tokens(result_only_messages)
+
+
+def analyze_context_pressure(
+    messages: list[Message],
+    current_tokens: int,
+    context_window: int,
+) -> ContextPressureReport:
+    """Classify context pressure without mutating conversation history."""
+    keep_start = _compute_keep_start_index(messages)
+    old_messages = messages[:keep_start]
+    recent_messages = messages[keep_start:]
+
+    old_tokens = estimate_tokens(old_messages)
+    stale_tool_tokens = _tool_result_tokens(old_messages)
+    existing_summary_tokens = sum(
+        _message_tokens(message)
+        for message in messages
+        if _COMPACT_SUMMARY_MARKER in message.content
+    )
+    old_summary_tokens = sum(
+        _message_tokens(message)
+        for message in old_messages
+        if _COMPACT_SUMMARY_MARKER in message.content
+    )
+    old_conversation_tokens = max(
+        0,
+        old_tokens - stale_tool_tokens - old_summary_tokens,
+    )
+    recent_tokens = estimate_tokens(recent_messages)
+
+    soft_threshold = compute_compact_threshold(context_window, manual=False)
+    hard_threshold = compute_compact_threshold(context_window, manual=True)
+    if current_tokens < soft_threshold:
+        pressure_level = "none"
+    elif current_tokens < hard_threshold:
+        pressure_level = "soft"
+    else:
+        pressure_level = "hard"
+
+    sources = {
+        "stale_tool_results": stale_tool_tokens,
+        "old_conversation": old_conversation_tokens,
+        "existing_summary": existing_summary_tokens,
+    }
+    dominant_source = (
+        "none" if pressure_level == "none" else max(sources, key=sources.get)
+    )
+
+    if pressure_level == "none":
+        recommended_action = "none"
+    elif pressure_level == "hard" and existing_summary_tokens > 0:
+        # A previously compacted working view has filled again. The first
+        # phase only marks it as a rollover candidate; it does not split it.
+        recommended_action = "window_rollover_candidate"
+    elif old_tokens > 0 and stale_tool_tokens * 2 >= old_tokens:
+        recommended_action = "compact_stale_tools"
+    else:
+        recommended_action = "structured_summary"
+
+    return ContextPressureReport(
+        current_tokens=current_tokens,
+        context_window=context_window,
+        usage_ratio=(current_tokens / context_window) if context_window > 0 else 0.0,
+        pressure_level=pressure_level,
+        keep_start=keep_start,
+        stale_tool_tokens=stale_tool_tokens,
+        old_conversation_tokens=old_conversation_tokens,
+        recent_tokens=recent_tokens,
+        existing_summary_tokens=existing_summary_tokens,
+        dominant_source=dominant_source,
+        recommended_action=recommended_action,
+    )
+
+
 # ---------------------------------------------------------------------------
 # 熔断器
 # ---------------------------------------------------------------------------
@@ -862,11 +1131,18 @@ async def auto_compact(
     budget_messages: list[Message] | None = None,
     system_prompt: str = "",
     request_recorder: Any | None = None,
+    at_user_boundary: bool = True,
+    cache_healthy: bool = True,
 ) -> CompactEvent | str | None:
     # 以真实 API 用量为锚点做阈值判断：current_tokens() 返回上次计费基准
     # （input + cache_read + cache_creation + output）加上锚点之后新增消息的
     # 字符估算。冷启动或刚压缩清空锚点时，退化为对整个 history 做字符估算。
     current = conversation.current_tokens()
+    pressure = analyze_context_pressure(
+        conversation.history,
+        current_tokens=current,
+        context_window=context_window,
+    )
 
     if manual:
         # 手动压缩（/compact）：直接走压缩流程，不检查阈值
@@ -888,6 +1164,48 @@ async def auto_compact(
             # 处于软硬阈值之间：走正常的熔断器保护逻辑
             if breaker is not None and breaker.is_open():
                 return "自动压缩已熔断（连续失败 3 次），请手动处理或使用 /compact"
+
+    policy_action = CompactionPolicy.decide(
+        pressure,
+        at_user_boundary=at_user_boundary,
+        cache_healthy=cache_healthy,
+    )
+    if not manual and policy_action in {
+        CompactionPolicy.NONE,
+        CompactionPolicy.DEFER,
+    }:
+        return None
+
+    if not manual and policy_action == CompactionPolicy.COMPACT_STALE_TOOLS:
+        original_history = conversation.history
+        compacted_history = compact_stale_tool_results(
+            original_history,
+            pressure.keep_start,
+            session_dir,
+        )
+        if compacted_history != original_history:
+            replacements: list[dict[str, str]] = []
+            for old_message, new_message in zip(original_history, compacted_history):
+                old_results = {
+                    result.tool_use_id: result.content
+                    for result in old_message.tool_results
+                }
+                for result in new_message.tool_results:
+                    old_content = old_results.get(result.tool_use_id)
+                    if old_content is not None and old_content != result.content:
+                        replacements.append(
+                            {
+                                "tool_use_id": result.tool_use_id,
+                                "content": result.content,
+                            }
+                        )
+            conversation.replace_history_preserving_runtime(compacted_history)
+            return CompactEvent(
+                before_tokens=current,
+                action=CompactionPolicy.COMPACT_STALE_TOOLS,
+                pressure=pressure,
+                tool_result_replacements=replacements,
+            )
 
     before_tokens = current
 
@@ -970,13 +1288,24 @@ async def auto_compact(
 
     summary = extract_summary(llm_output)
     attachment = build_recovery_attachment(recovery, tool_schemas)
-    # 重建 = 摘要(user) + 尾部原文。
-    new_messages = build_compact_messages(
-        summary,
-        attachment=attachment,
-        has_keep_tail=bool(keep_tail),
-        transcript_path=transcript_path,
-    )
+    artifact_refs = _persisted_artifact_refs(effective_history)
+    # 重建 = 交接摘要(user) + 尾部原文。窗口切换会显式保留 artifact
+    # 索引；完整结果仍由 Session 持有，绝不复制回新窗口。
+    if not manual and policy_action == CompactionPolicy.WINDOW_ROLLOVER:
+        new_messages = build_window_rollover_messages(
+            summary,
+            artifact_refs=artifact_refs,
+            attachment=attachment,
+            has_keep_tail=bool(keep_tail),
+            transcript_path=transcript_path,
+        )
+    else:
+        new_messages = build_compact_messages(
+            summary,
+            attachment=attachment,
+            has_keep_tail=bool(keep_tail),
+            transcript_path=transcript_path,
+        )
     new_messages = new_messages + list(keep_tail)
 
     # replace_history 替换为重建后的对话并将用量锚点清零
@@ -985,7 +1314,10 @@ async def auto_compact(
     # 不清零会导致 current_tokens() 对增量的估算出错。
     # 下一次 API 响应会基于重建后的 history 重新锚定。
     conversation.replace_history(new_messages)
-    cleanup_tool_results(session_dir, keep_messages=new_messages)
+    # Artifact files are part of the Session's recoverable fact layer.  A
+    # compacted Conversation may no longer reference them, but the Journal can
+    # still point to the original tool result.  Session deletion owns cleanup.
+    conversation.reset_appendix_baseline()
 
     if breaker is not None:
         breaker.record_success()
@@ -994,5 +1326,15 @@ async def auto_compact(
     # 由它持久化为一条 compact_boundary 记录。keep tail 就是拼回重建 history 的那段。
     return CompactEvent(
         before_tokens=before_tokens,
-        boundary=CompactBoundary(summary=summary, keep=list(keep_tail)),
+        boundary=CompactBoundary(
+            summary=summary,
+            keep=list(keep_tail),
+            artifact_refs=artifact_refs,
+        ),
+        action=(
+            CompactionPolicy.WINDOW_ROLLOVER
+            if not manual and policy_action == CompactionPolicy.WINDOW_ROLLOVER
+            else CompactionPolicy.STRUCTURED_SUMMARY
+        ),
+        pressure=pressure,
     )

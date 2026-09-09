@@ -361,6 +361,20 @@ class ConversationManager:
         self.anchor_count = 0
         self.last_input_tokens = 0
 
+    def replace_history_preserving_runtime(self, new_messages: list[Message]) -> None:
+        """Replace message payloads without reinjecting runtime context.
+
+        Local context eviction changes only historical tool-result bodies.  The
+        environment and memory appendix are still valid, so resetting their
+        injection flags would append duplicate runtime blocks on the next turn.
+        Usage anchors are reset because their message-count boundary is stale.
+        """
+        self.history = new_messages
+        self._rebuild_reminder_versions()
+        self.baseline_tokens = 0
+        self.anchor_count = 0
+        self.last_input_tokens = 0
+
 
     def get_messages(self) -> list[Message]:
         return [*self.history, *self.ephemeral]

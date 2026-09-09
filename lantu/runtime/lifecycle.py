@@ -26,7 +26,6 @@ MEMORY_PREFETCH_TIMEOUT = 8.0
 
 def switch_runtime_work_dir(runtime: InteractiveRuntime, path: str) -> None:
     runtime.agent.work_dir = path
-    runtime.agent.retarget_repo_map(path)
     runtime.permission_checker.sandbox = PathSandbox(path)
     for tool in runtime.registry.list_tools():
         tool.work_dir = path
@@ -226,6 +225,14 @@ async def initialize_runtime_mcp(runtime: InteractiveRuntime) -> None:
         if runtime._closed:
             return
         runtime.mcp_manager = manager
+        code_search = runtime.registry.get("CodeSearch")
+        if code_search is not None and hasattr(code_search, "set_mcp_manager"):
+            code_search.set_mcp_manager(manager)
+        # CodeSearch owns zvec-grep routing and fallback. Keep its raw MCP
+        # tools available to the internal manager but hide them from the model.
+        for tool in result.tools:
+            if tool.name.startswith("mcp_zvec_grep_"):
+                runtime.registry.disable(tool.name)
         published = True
         runtime.mcp_instructions = _build_mcp_instructions(runtime, result)
         runtime.startup_messages.extend(f"MCP warning: {error}" for error in result.errors)

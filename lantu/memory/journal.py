@@ -23,6 +23,8 @@ EVENT_TYPES = frozenset(
         "turn.interrupted",
         "message.created",
         "context.compacted",
+        "context.window.rolled_over",
+        "context.tool_results_compacted",
         "tool.started",
         "tool.completed",
         "tool.failed",
@@ -126,6 +128,10 @@ class SessionJournal:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def next_sequence(self) -> int:
+        return self._next_sequence
 
     def append(
         self,

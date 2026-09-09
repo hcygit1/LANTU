@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import string
 import uuid
 from dataclasses import dataclass, field
@@ -110,6 +111,7 @@ class Session:
         loaded_tool_states: list[dict[str, str]] | None = None,
         file_ledger: FileLedger | None = None,
         schema_epoch: dict[str, Any] | None = None,
+        active_window_id: str | None = None,
     ) -> None:
         self.session_id = journal.session_id
         self.journal = journal
@@ -121,6 +123,7 @@ class Session:
         self.loaded_tool_states = loaded_tool_states or []
         self.file_ledger = file_ledger or FileLedger()
         self.schema_epoch = dict(schema_epoch) if schema_epoch else None
+        self.active_window_id = active_window_id or _new_id("window")
         self._message_ids: dict[int, str] = {}
         self._closed = False
 
@@ -167,6 +170,7 @@ class Session:
             raise RuntimeError("messages require an active runtime and turn")
         message_id = _new_id("msg")
         payload = _message_payload(message, message_id)
+        payload["window_id"] = self.active_window_id
         event = self.journal.append(
             "message.created",
             payload,
@@ -211,6 +215,72 @@ class Session:
             runtime_id=self.runtime_id,
             turn_id=self.turn_id,
         )
+        self.meta.summary = summary
+        self.meta.last_active = _parse_timestamp(event.timestamp)
+        self._save_meta_cache()
+        return event
+
+    def tool_results_compacted(
+        self, replacements: list[dict[str, str]]
+    ) -> JournalEvent | None:
+        """Persist local tool-result eviction without rewriting past messages."""
+        if not replacements:
+            return None
+        if self.runtime_id is None or self.turn_id is None:
+            raise RuntimeError("tool-result compaction requires an active turn")
+        event = self.journal.append(
+            "context.tool_results_compacted",
+            {"replacements": replacements},
+            runtime_id=self.runtime_id,
+            turn_id=self.turn_id,
+        )
+        self.meta.last_active = _parse_timestamp(event.timestamp)
+        self._save_meta_cache()
+        return event
+
+    def context_window_rolled_over(
+        self,
+        summary: str,
+        keep: list[Message],
+        artifact_refs: list[str] | None = None,
+    ) -> JournalEvent:
+        """Persist a new Conversation projection within the current Session."""
+        if self.runtime_id is None or self.turn_id is None:
+            raise RuntimeError("context window rollover requires an active turn")
+        kept_message_ids = [
+            self._message_ids[id(message)]
+            for message in keep
+            if id(message) in self._message_ids
+        ]
+        parent_window_id = self.active_window_id
+        window_id = _new_id("window")
+        events = self.journal.read()
+        all_artifact_refs = _artifact_refs_from_events(events)
+        all_artifact_refs.update(artifact_refs or [])
+        file_ledger_sequence = max(
+            (
+                item.sequence
+                for item in events
+                if item.type in {"file.observed", "file.updated"}
+            ),
+            default=None,
+        )
+        event = self.journal.append(
+            "context.window.rolled_over",
+            {
+                "window_id": window_id,
+                "parent_window_id": parent_window_id,
+                "archived_until_sequence": self.journal.next_sequence - 1,
+                "summary": summary,
+                "kept_message_ids": kept_message_ids,
+                "artifact_refs": sorted(all_artifact_refs),
+                "file_ledger_sequence": file_ledger_sequence,
+                "schema_epoch": dict(self.schema_epoch) if self.schema_epoch else None,
+            },
+            runtime_id=self.runtime_id,
+            turn_id=self.turn_id,
+        )
+        self.active_window_id = window_id
         self.meta.summary = summary
         self.meta.last_active = _parse_timestamp(event.timestamp)
         self._save_meta_cache()
@@ -285,14 +355,25 @@ class SessionManager:
 
     def create(self) -> Session:
         session_id = _generate_session_id()
+        window_id = _new_id("window")
         journal = SessionJournal(self._sessions_dir, session_id)
         event = journal.append(
             "session.created",
-            {"project_root": str(self._work_dir), "lantu_version": _lantu_version()},
+            {
+                "project_root": str(self._work_dir),
+                "lantu_version": _lantu_version(),
+                "window_id": window_id,
+            },
         )
         created_at = _parse_timestamp(event.timestamp)
         meta = SessionMeta(id=session_id, created_at=created_at, last_active=created_at)
-        session = Session(journal, meta, self._sessions_dir, file_ledger=FileLedger())
+        session = Session(
+            journal,
+            meta,
+            self._sessions_dir,
+            file_ledger=FileLedger(),
+            active_window_id=window_id,
+        )
         session._save_meta_cache()
         return session
 
@@ -336,6 +417,10 @@ class SessionManager:
                 loaded_tool_states=_tool_schema_states(events),
                 file_ledger=_file_ledger_from_events(events),
                 schema_epoch=_schema_epoch_from_events(events),
+                active_window_id=(
+                    _active_window_from_events(events)
+                    or f"window_legacy_{session_id}"
+                ),
             )
             session._register_projected_messages(projected)
             session._save_meta_cache()
@@ -349,12 +434,35 @@ class SessionManager:
             raise
 
     def delete(self, session_id: str) -> bool:
+        journal_path = self._sessions_dir / f"{session_id}.jsonl"
+        target_artifacts = _artifact_paths_from_journal(
+            journal_path,
+            self._work_dir / ".lantu" / "session" / "tool-results",
+        )
+        remaining_artifacts: set[Path] = set()
+        for other_journal in self._sessions_dir.glob("*.jsonl"):
+            if other_journal == journal_path:
+                continue
+            remaining_artifacts.update(
+                _artifact_paths_from_journal(
+                    other_journal,
+                    self._work_dir / ".lantu" / "session" / "tool-results",
+                )
+            )
+
         deleted = False
         for suffix in (".jsonl", ".meta", ".jsonl.lock"):
             path = self._sessions_dir / f"{session_id}{suffix}"
             if path.exists():
                 path.unlink()
                 deleted = True
+        for artifact in target_artifacts - remaining_artifacts:
+            try:
+                if artifact.exists():
+                    artifact.unlink()
+                    deleted = True
+            except OSError:
+                pass
         return deleted
 
 
@@ -362,6 +470,73 @@ def _generate_session_id() -> str:
     now = datetime.now()
     suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
     return f"session_{now.strftime('%Y%m%d_%H%M%S')}_{suffix}"
+
+
+def _artifact_paths_from_journal(
+    journal_path: Path,
+    artifact_dir: Path,
+) -> set[Path]:
+    """Find only safe, in-session artifact paths referenced by a Journal."""
+    if not journal_path.exists():
+        return set()
+    try:
+        events = SessionJournal.read_file(journal_path)
+    except Exception:
+        return set()
+
+    root = artifact_dir.resolve()
+    paths: set[Path] = set()
+    path_pattern = re.compile(r"完整内容已保存到：\n([^\n]+)")
+
+    def add_candidate(raw: str) -> None:
+        candidate = Path(raw.strip())
+        if candidate.suffix != ".txt":
+            return
+        try:
+            resolved = candidate.resolve(strict=False)
+            resolved.relative_to(root)
+        except (OSError, ValueError):
+            return
+        paths.add(resolved)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, str):
+            add_candidate(value)
+            for match in path_pattern.finditer(value):
+                add_candidate(match.group(1))
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    for event in events:
+        visit(event.payload)
+    return paths
+
+
+def _artifact_refs_from_events(events: list[JournalEvent]) -> set[str]:
+    """Collect persisted-output paths from the complete append-only history."""
+    path_pattern = re.compile(r"完整内容已保存到：\n([^\n]+)")
+    refs: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, str):
+            for match in path_pattern.finditer(value):
+                path = match.group(1).strip()
+                if path:
+                    refs.add(path)
+        elif isinstance(value, dict):
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    for event in events:
+        visit(event.payload)
+    return refs
 
 
 def _message_payload(message: Message, message_id: str) -> dict[str, Any]:
@@ -484,6 +659,46 @@ def _project_messages(events: list[JournalEvent]) -> list[tuple[str, Message]]:
                 if message is not None:
                     compacted.append((str(message_id), message))
             projected = compacted
+        elif event.type == "context.window.rolled_over":
+            summary = str(event.payload.get("summary", ""))
+            artifact_refs = [
+                str(item)
+                for item in event.payload.get("artifact_refs", [])
+                if isinstance(item, str) and item
+            ]
+            content = (
+                "本次会话已在同一个 Session 内切换到新的上下文窗口。"
+                "旧窗口仍完整保存在 Journal 中，以下是继续当前任务所需的交接摘要：\n\n"
+                + summary
+            )
+            if artifact_refs:
+                content += (
+                    "\n\n## 历史工具结果索引\n"
+                    "以下文件仍由 Session 保留；需要原始结果时请重新使用读取或搜索工具：\n"
+                    + "\n".join(f"- {path}" for path in artifact_refs)
+                )
+            rolled: list[tuple[str, Message]] = [
+                (f"window_{event.event_id}", Message(role="user", content=content))
+            ]
+            for message_id in event.payload.get("kept_message_ids", []):
+                message = messages.get(str(message_id))
+                if message is not None:
+                    rolled.append((str(message_id), message))
+            projected = rolled
+        elif event.type == "context.tool_results_compacted":
+            replacements = event.payload.get("replacements", [])
+            if not isinstance(replacements, list):
+                continue
+            replacement_by_tool_id = {
+                str(item.get("tool_use_id", "")): str(item.get("content", ""))
+                for item in replacements
+                if isinstance(item, dict) and item.get("tool_use_id")
+            }
+            for _message_id, message in projected:
+                for result in message.tool_results:
+                    replacement = replacement_by_tool_id.get(result.tool_use_id)
+                    if replacement is not None:
+                        result.content = replacement
     return projected
 
 
@@ -507,7 +722,7 @@ def _meta_from_events(events: list[JournalEvent]) -> SessionMeta | None:
                 and event.payload.get("content")
             ):
                 meta.title = str(event.payload["content"])[:TITLE_MAX_LENGTH]
-        elif event.type == "context.compacted":
+        elif event.type in {"context.compacted", "context.window.rolled_over"}:
             meta.summary = str(event.payload.get("summary", ""))
         elif event.type == "usage.recorded":
             meta.total_tokens += sum(
@@ -560,6 +775,20 @@ def _schema_epoch_from_events(events: list[JournalEvent]) -> dict[str, Any] | No
         if event.type == "tool.schema.epoch.changed":
             latest = dict(event.payload)
     return latest
+
+
+def _active_window_from_events(events: list[JournalEvent]) -> str | None:
+    window_id: str | None = None
+    for event in events:
+        if event.type == "session.created":
+            value = event.payload.get("window_id")
+            if isinstance(value, str) and value:
+                window_id = value
+        elif event.type == "context.window.rolled_over":
+            value = event.payload.get("window_id")
+            if isinstance(value, str) and value:
+                window_id = value
+    return window_id
 
 
 def _append_interruption_events(

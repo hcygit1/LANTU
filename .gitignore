@@ -12,5 +12,6 @@ jobs/
 .worktrees/
 .lantu/*
 !.lantu/config.yaml.example
+.zvec-grep/
 .claude/
 CLAUDE.md

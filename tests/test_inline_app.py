@@ -754,9 +754,11 @@ async def test_run_prompt_persists_messages_tokens_and_mcp_once(tmp_path: Path) 
         "user",
         "assistant",
     ]
+    assert runtime.conversation.flush_appendix()
     reminders = [m for m in runtime.conversation.history if "MCP rules" in m.content]
     assert len(reminders) == 1
-    assert reminders[0].reminder_key == "mcp_instructions"
+    assert '<appendix key="mcp_instructions">' in reminders[0].content
+    assert reminders[0].reminder_key == "context-update"
     assert reminders[0].reminder_hash
     assert runtime.session.meta.total_tokens == 18
 
@@ -1542,6 +1544,7 @@ async def test_set_conversation_reinjects_mcp_on_next_prompt(tmp_path: Path) -> 
     app.build_command_context("").config["set_conversation"](new_conversation)
     await app.run_prompt("second")
 
+    assert new_conversation.flush_appendix()
     reminders = [message for message in new_conversation.history if "MCP rules" in message.content]
     assert len(reminders) == 1
 

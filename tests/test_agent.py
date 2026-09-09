@@ -26,7 +26,6 @@ from lantu.agent import (
 from lantu.prompts import build_environment_context, build_plan_mode_reminder, build_system_prompt
 from lantu.client import LLMClient
 from lantu.conversation import ConversationManager, ToolResultBlock
-from lantu.context.repo_map import build_repo_map
 from lantu.memory.file_ledger import FileLedger
 from lantu.hooks import Action, Hook, HookEngine
 from lantu.memory.session import SessionManager
@@ -256,7 +255,7 @@ async def test_system_prompt_is_stable_across_agent_runs():
 
 
 @pytest.mark.asyncio
-async def test_enabled_repo_map_is_part_of_stable_system_prompt(tmp_path):
+async def test_repository_search_prompt_does_not_include_full_repo_map(tmp_path):
     (tmp_path / "app.py").write_text(
         "def handle_request():\n    return None\n", encoding="utf-8"
     )
@@ -268,7 +267,6 @@ async def test_enabled_repo_map_is_part_of_stable_system_prompt(tmp_path):
         create_default_registry(),
         "anthropic",
         work_dir=str(tmp_path),
-        repo_map=build_repo_map(tmp_path, max_tokens=200),
     )
     conversation = ConversationManager()
     conversation.add_user_message("find the entrypoint")
@@ -276,8 +274,9 @@ async def test_enabled_repo_map_is_part_of_stable_system_prompt(tmp_path):
     async for _ in agent.run(conversation):
         pass
 
-    assert "## Repository Map" in client.systems[0]
-    assert "app.py:1 function handle_request" in client.systems[0]
+    assert "## Repository Search" in client.systems[0]
+    assert "## Repository Map" not in client.systems[0]
+    assert "app.py:1 function handle_request" not in client.systems[0]
 
 
 @pytest.mark.asyncio
@@ -722,7 +721,7 @@ async def test_deferred_tool_reminder_is_not_repeated_across_iterations(tmp_path
     reminders = [
         message
         for message in client.message_snapshots[-1]
-        if message.reminder_key == "deferred_tools"
+        if '<appendix key="deferred_tools">' in message.content
     ]
     assert len(reminders) == 1
 
@@ -1458,10 +1457,10 @@ async def test_plan_mode_reminder_is_not_repeated_while_content_is_unchanged(tmp
     reminders = [
         message
         for message in conversation.history
-        if message.reminder_key == "plan_mode"
+        if '<appendix key="plan_mode">' in message.content
     ]
     assert len(reminders) == 1
-    assert reminders[0].reminder_hash
+    assert "Plan mode is active" in reminders[0].content
 
 def test_environment_context():
     ctx = build_environment_context("/home/user/project")

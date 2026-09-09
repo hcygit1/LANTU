@@ -17,6 +17,7 @@ from lantu.context import (
     CompactBoundary,
     CompactCircuitBreaker,
     CompactEvent,
+    CompactionPolicy,
     RecoveryState,
     auto_compact,
     ensure_session_dir,
@@ -29,7 +30,6 @@ from lantu.conversation import (
     ToolUseBlock,
 )
 from lantu.conversation import ThinkingBlock as ConvThinkingBlock
-from lantu.context.repo_map import RepoMap, RepoMapSnapshot
 from lantu.memory.auto_memory import MemoryManager
 from lantu.memory.file_ledger import FileLedger
 from lantu.memory.recall import render_memory_appendix
@@ -127,6 +127,8 @@ class CompactNotification:
     # 结构化 boundary（摘要 + 原文保留尾部），UI/session 层用它持久化 compact_boundary 记录。
     # 失败路径下为 None。
     boundary: "CompactBoundary | None" = None
+    action: str = CompactionPolicy.STRUCTURED_SUMMARY
+    tool_result_replacements: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -314,7 +316,6 @@ class Agent:
         memory_manager: MemoryManager | None = None,
         hook_engine: HookEngine | None = None,
         session: Any | None = None,
-        repo_map: RepoMap | None = None,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -338,7 +339,6 @@ class Agent:
         self.memory_manager = memory_manager
         self.hook_engine = hook_engine
         self.session = session
-        self.repo_map = repo_map
         self.file_ledger = getattr(session, "file_ledger", None) or FileLedger()
         session_epoch = getattr(session, "schema_epoch", None)
         self._schema_epoch_id = (
@@ -463,25 +463,15 @@ class Agent:
                 coordinator_mode=self.coordinator_mode,
                 agent_catalog=self._agent_catalog_list or None,
             )
-            if self.repo_map is not None:
-                repo_map_section = self.repo_map.prompt_section()
-                if repo_map_section:
-                    self._stable_system_prompt += f"\n\n{repo_map_section}"
+            self._stable_system_prompt += (
+                "\n\n## Repository Search\n"
+                "This workspace may provide a local persistent code index. Use "
+                "CodeSearch for repository discovery and cross-file understanding. "
+                "Use exact mode for exhaustive literal or regex matches. Search "
+                "results are bounded and may be stale; use ReadFile to inspect "
+                "current source before making claims or edits."
+            )
         return self._stable_system_prompt
-
-    def refresh_repo_map(self) -> RepoMapSnapshot:
-        if self.repo_map is None:
-            raise RuntimeError("RepoMap is disabled in context.repo_map.enabled")
-        snapshot = self.repo_map.refresh()
-        self._stable_system_prompt = None
-        return snapshot
-
-    def retarget_repo_map(self, work_dir: str) -> RepoMapSnapshot | None:
-        if self.repo_map is None:
-            return None
-        snapshot = self.repo_map.retarget(work_dir)
-        self._stable_system_prompt = None
-        return snapshot
 
     def _append_hook_prompts(self, conversation: ConversationManager) -> None:
         if not self.hook_engine:
@@ -519,7 +509,7 @@ class Agent:
         ]
 
     def _refresh_runtime_appendix(
-        self, conversation: ConversationManager, iteration: int
+        self, conversation: ConversationManager
     ) -> None:
         """Append keyed runtime snapshots without rewriting prior messages."""
         try:
@@ -538,12 +528,6 @@ class Agent:
             "<runtime-state key=\"git_status\">\n"
             + (git_status or "clean")
             + "\n</runtime-state>",
-        )
-        plan_state = "planning" if self.plan_mode else "normal"
-        conversation.set_appendix_block(
-            "task_progress",
-            f"<runtime-state key=\"task_progress\">iteration={iteration}; "
-            f"plan_mode={plan_state}</runtime-state>",
         )
 
     async def _run_core(
@@ -599,7 +583,7 @@ class Agent:
                     yield he
 
             self._append_hook_prompts(conversation)
-            self._refresh_runtime_appendix(conversation, iteration)
+            self._refresh_runtime_appendix(conversation)
             system = self._get_system_prompt()
 
             if self.plan_mode:
@@ -647,19 +631,27 @@ class Agent:
                 tool_schemas=tools,
                 transcript_path=self._transcript_path,
                 request_recorder=self.request_recorder,
+                at_user_boundary=iteration == 1,
             )
             if isinstance(compact_result, CompactEvent):
                 yield CompactNotification(
                     before_tokens=compact_result.before_tokens,
-                    message=f"上下文已压缩（压缩前 {compact_result.before_tokens:,} tokens）",
+                    message=(
+                        f"已清理陈旧工具结果（处理前 {compact_result.before_tokens:,} tokens）"
+                        if compact_result.action == CompactionPolicy.COMPACT_STALE_TOOLS
+                        else f"上下文已压缩（压缩前 {compact_result.before_tokens:,} tokens）"
+                    ),
                     boundary=compact_result.boundary,
+                    action=compact_result.action,
+                    tool_result_replacements=compact_result.tool_result_replacements,
                 )
-                self.file_ledger.clear_visible()
-                conversation.inject_environment(env_context)
-                mem = self.memory_manager.load() if self.memory_manager else ""
-                conversation.inject_long_term_memory(
-                    self.instructions_content, mem
-                )
+                if compact_result.action != CompactionPolicy.COMPACT_STALE_TOOLS:
+                    self.file_ledger.clear_visible()
+                    conversation.inject_environment(env_context)
+                    mem = self.memory_manager.load() if self.memory_manager else ""
+                    conversation.inject_long_term_memory(
+                        self.instructions_content, mem
+                    )
             elif isinstance(compact_result, str):
                 yield ErrorEvent(message=compact_result)
 
@@ -1467,6 +1459,8 @@ class Agent:
                 before_tokens=result.before_tokens,
                 message=f"上下文已压缩（压缩前 {result.before_tokens:,} tokens）",
                 boundary=result.boundary,
+                action=result.action,
+                tool_result_replacements=result.tool_result_replacements,
             )
         return ErrorEvent(message=result or "压缩失败：对话历史为空或未达到压缩条件")
 

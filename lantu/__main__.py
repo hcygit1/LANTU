@@ -12,6 +12,7 @@ from pathlib import Path
 from lantu.config import ConfigError, load_config
 from lantu.hooks import HookConfigError, HookEngine, load_hooks
 from lantu.permissions import PermissionMode
+from lantu.context import CompactionPolicy
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -346,7 +347,6 @@ def _main() -> None:
             hook_engine=hook_engine,
             show_thinking=config.ui.show_thinking,
             tool_loading_mode=tool_loading_mode,
-            repo_map_config=getattr(getattr(config, "context", None), "repo_map", None),
         )
         asyncio.run(server.run())
         return
@@ -472,7 +472,6 @@ async def _run_prompt_with_client(
     from lantu.tools.team_delete import TeamDeleteTool
     from lantu.worktree import WorktreeManager
     from lantu.config import WorktreeConfig
-    from lantu.context.repo_map import build_repo_map
 
     is_json = output_format == "stream-json"
 
@@ -499,17 +498,10 @@ async def _run_prompt_with_client(
 
     instructions = load_instructions(work_dir)
     registry = create_default_registry(
-        loading_mode=getattr(config, "tool_loading_mode", "standard")
+        loading_mode=getattr(config, "tool_loading_mode", "standard"),
+        work_dir=work_dir,
     )
     registry.register(ToolSearchTool(registry, protocol=provider.protocol))
-
-    repo_map_config = getattr(getattr(config, "context", None), "repo_map", None)
-    repo_map = None
-    if repo_map_config is not None and repo_map_config.enabled:
-        repo_map = build_repo_map(
-            work_dir,
-            max_tokens=repo_map_config.max_tokens,
-        )
 
     agent = Agent(
         client=client,
@@ -521,7 +513,6 @@ async def _run_prompt_with_client(
         instructions_content=instructions,
         hook_engine=hook_engine,
         session=session,
-        repo_map=repo_map,
     )
 
     wt_cfg = config.worktree or WorktreeConfig()
@@ -584,11 +575,23 @@ async def _run_prompt_with_client(
         try:
             async for event in agent.run(conv):
                 if isinstance(event, CompactNotification) and event.boundary is not None:
-                    session.context_compacted(
-                        event.boundary.summary,
-                        event.boundary.keep,
-                    )
+                    if event.action == CompactionPolicy.WINDOW_ROLLOVER:
+                        session.context_window_rolled_over(
+                            event.boundary.summary,
+                            event.boundary.keep,
+                            event.boundary.artifact_refs,
+                        )
+                    else:
+                        session.context_compacted(
+                            event.boundary.summary,
+                            event.boundary.keep,
+                        )
                     history_cursor = len(conv.history)
+                elif (
+                    isinstance(event, CompactNotification)
+                    and event.tool_result_replacements
+                ):
+                    session.tool_results_compacted(event.tool_result_replacements)
                 elif isinstance(event, TurnComplete):
                     for message in conv.history[history_cursor:]:
                         session.commit_message(message)

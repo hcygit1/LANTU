@@ -615,6 +615,6 @@ class TestAgentHookIntegration:
         reminders = [
             message
             for message in conversation.history
-            if message.reminder_key == "hook:project-context:pre_send"
+            if '<appendix key="hook:project-context:pre_send">' in message.content
         ]
         assert len(reminders) == 1

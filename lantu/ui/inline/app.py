@@ -19,6 +19,7 @@ from lantu.agent import (
 )
 from lantu.agents.notification import inject_task_notifications
 from lantu.client import LLMError
+from lantu.context import CompactionPolicy
 from lantu.commands import CommandContext
 from lantu.conversation import ConversationManager, Message, MessageKind
 from lantu.filehistory import FileHistory
@@ -398,9 +399,19 @@ class InlineApp:
 
     def persist_compact_boundary(self, notification: CompactNotification) -> None:
         boundary = notification.boundary
-        if boundary is None:
-            return
-        self.runtime.session.context_compacted(boundary.summary, boundary.keep)
+        if boundary is not None:
+            if notification.action == CompactionPolicy.WINDOW_ROLLOVER:
+                self.runtime.session.context_window_rolled_over(
+                    boundary.summary,
+                    boundary.keep,
+                    boundary.artifact_refs,
+                )
+            else:
+                self.runtime.session.context_compacted(boundary.summary, boundary.keep)
+        elif notification.tool_result_replacements:
+            self.runtime.session.tool_results_compacted(
+                notification.tool_result_replacements
+            )
 
     async def process_task_notifications(self) -> None:
         if self._processing_notifications:

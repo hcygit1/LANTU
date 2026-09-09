@@ -17,11 +17,15 @@ from lantu.context.manager import (
     TOOL_RESULT_HEAD_CHARS,
     TOOL_RESULT_TAIL_CHARS,
     CompactCircuitBreaker,
+    CompactionPolicy,
+    ContextPressureReport,
     _align_keep_start_to_tool_pair,
     _compute_keep_start_index,
+    analyze_context_pressure,
     auto_compact,
     build_compact_messages,
     cleanup_tool_results,
+    compact_stale_tool_results,
     compute_compact_threshold,
     ensure_session_dir,
     extract_summary,
@@ -674,6 +678,217 @@ class TestAlignKeepStartToToolPair:
         assert kept_result_ids <= kept_use_ids
 
 
+class TestAnalyzeContextPressure:
+    def test_no_pressure_recommends_nothing(self) -> None:
+        report = analyze_context_pressure(
+            [_user(1_000) for _ in range(10)],
+            current_tokens=100_000,
+            context_window=200_000,
+        )
+
+        assert isinstance(report, ContextPressureReport)
+        assert report.pressure_level == "none"
+        assert report.dominant_source == "none"
+        assert report.recommended_action == "none"
+
+    def test_stale_tool_results_are_classified_for_local_compaction(self) -> None:
+        old_tool_call = Message(
+            role="assistant",
+            content="call",
+            tool_uses=[ToolUseBlock("old-tool", "Bash", {})],
+        )
+        old_tool_result = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock("old-tool", "x" * 140_000)],
+        )
+        messages = [old_tool_call, old_tool_result] + [
+            _user(3_000) for _ in range(MIN_KEEP_MESSAGES)
+        ]
+
+        report = analyze_context_pressure(
+            messages,
+            current_tokens=170_000,
+            context_window=200_000,
+        )
+
+        assert report.pressure_level == "soft"
+        assert report.stale_tool_tokens > report.old_conversation_tokens
+        assert report.dominant_source == "stale_tool_results"
+        assert report.recommended_action == "compact_stale_tools"
+
+    def test_old_conversation_is_classified_for_structured_summary(self) -> None:
+        messages = [_user(8_000) for _ in range(8)] + [
+            _user(3_000) for _ in range(MIN_KEEP_MESSAGES)
+        ]
+
+        report = analyze_context_pressure(
+            messages,
+            current_tokens=170_000,
+            context_window=200_000,
+        )
+
+        assert report.old_conversation_tokens > report.stale_tool_tokens
+        assert report.dominant_source == "old_conversation"
+        assert report.recommended_action == "structured_summary"
+
+    def test_refilled_compacted_context_is_rollover_candidate(self) -> None:
+        summary = Message(
+            role="user",
+            content=(
+                "本次会话延续自之前的对话，因上下文空间不足进行了压缩。"
+                + "s" * 20_000
+            ),
+        )
+        messages = [summary] + [_user(3_000) for _ in range(MIN_KEEP_MESSAGES)]
+
+        report = analyze_context_pressure(
+            messages,
+            current_tokens=178_000,
+            context_window=200_000,
+        )
+
+        assert report.pressure_level == "hard"
+        assert report.existing_summary_tokens > 0
+        assert report.recommended_action == "window_rollover_candidate"
+
+
+class TestCompactionPolicy:
+    def test_low_pressure_is_a_noop(self) -> None:
+        report = analyze_context_pressure(
+            [_user(100) for _ in range(5)],
+            current_tokens=10_000,
+            context_window=200_000,
+        )
+
+        assert CompactionPolicy.decide(report) == CompactionPolicy.NONE
+
+    def test_soft_pressure_waits_when_cache_is_healthy(self) -> None:
+        report = analyze_context_pressure(
+            [_user(8_000) for _ in range(8)] + [_user(3_000) for _ in range(MIN_KEEP_MESSAGES)],
+            current_tokens=170_000,
+            context_window=200_000,
+        )
+
+        assert CompactionPolicy.decide(report, cache_healthy=True) == CompactionPolicy.DEFER
+        assert CompactionPolicy.decide(report, cache_healthy=False) == CompactionPolicy.STRUCTURED_SUMMARY
+
+    def test_local_eviction_is_deferred_until_user_boundary(self) -> None:
+        call = Message(
+            role="assistant",
+            content="call",
+            tool_uses=[ToolUseBlock("old-tool", "Bash", {})],
+        )
+        result = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock("old-tool", "x" * 140_000)],
+        )
+        report = analyze_context_pressure(
+            [call, result] + [_user(3_000) for _ in range(MIN_KEEP_MESSAGES)],
+            current_tokens=170_000,
+            context_window=200_000,
+        )
+
+        assert CompactionPolicy.decide(report, at_user_boundary=False) == CompactionPolicy.DEFER
+        assert CompactionPolicy.decide(report, at_user_boundary=True) == CompactionPolicy.COMPACT_STALE_TOOLS
+
+    def test_repeated_hard_pressure_becomes_window_rollover(self) -> None:
+        summary = Message(
+            role="user",
+            content="本次会话延续自之前的对话，因上下文空间不足进行了压缩。" + "s" * 20_000,
+        )
+        report = analyze_context_pressure(
+            [summary] + [_user(3_000) for _ in range(MIN_KEEP_MESSAGES)],
+            current_tokens=178_000,
+            context_window=200_000,
+        )
+
+        assert CompactionPolicy.decide(report) == CompactionPolicy.WINDOW_ROLLOVER
+
+
+class TestCompactStaleToolResults:
+    def test_existing_preview_becomes_reference_only_in_old_region(
+        self, tmp_path: Path
+    ) -> None:
+        artifact = persist_tool_result("old-tool", "complete output", tmp_path)
+        preview = make_persisted_preview("complete output", artifact)
+        old = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock("old-tool", preview)],
+        )
+        recent = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock("recent-tool", "small")],
+        )
+
+        result = compact_stale_tool_results([old, recent], 1, tmp_path)
+
+        assert "输出太大" not in result[0].tool_results[0].content
+        assert str(artifact) in result[0].tool_results[0].content
+        assert result[1] is recent
+
+    def test_raw_oversized_result_is_persisted_before_eviction(
+        self, tmp_path: Path
+    ) -> None:
+        raw = "x" * (TOOL_RESULT_INLINE_CHAR_LIMIT + 10)
+        old = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock("raw-tool", raw)],
+        )
+
+        result = compact_stale_tool_results([old], 1, tmp_path)
+        content = result[0].tool_results[0].content
+
+        assert PERSISTED_TAG in content
+        assert "raw-tool.txt" in content
+        assert (tmp_path / "raw-tool.txt").read_text(encoding="utf-8") == raw
+
+    def test_short_inline_result_and_recent_result_are_unchanged(
+        self, tmp_path: Path
+    ) -> None:
+        old = Message(
+            role="user",
+            content="",
+            tool_results=[ToolResultBlock("short-tool", "short")],
+        )
+        result = compact_stale_tool_results([old], 1, tmp_path)
+
+        assert result[0] is old
+        assert result[0].tool_results[0].content == "short"
+
+    @pytest.mark.asyncio
+    async def test_auto_compact_returns_local_eviction_event(self, tmp_path: Path) -> None:
+        old = Message(
+            role="user",
+            content="",
+            tool_results=[
+                ToolResultBlock(
+                    "old-tool",
+                    "x" * 100_000,
+                )
+            ],
+        )
+        recent = [_user(3_000) for _ in range(MIN_KEEP_MESSAGES + 5)]
+        conversation = ConversationManager(history=[old, *recent])
+
+        result = await auto_compact(
+            conversation,
+            _SummaryClient(),
+            context_window=50_000,
+            session_dir=tmp_path,
+        )
+
+        assert result is not None
+        assert result.action == CompactionPolicy.COMPACT_STALE_TOOLS
+        assert result.boundary is None
+        assert result.tool_result_replacements
+        assert "完整内容已保存到" in conversation.history[0].tool_results[0].content
+
+
 # ---------------------------------------------------------------------------
 # auto_compact：原文保留最近消息 + 摘要只覆盖前缀 + 重置锚点
 # ---------------------------------------------------------------------------
@@ -891,6 +1106,38 @@ class TestAutoCompactKeepRecent:
         assert conv.anchor_count == 0
         assert conv.last_input_tokens == 0
 
+    async def test_full_compaction_keeps_unreferenced_artifacts_for_session_recovery(
+        self, tmp_path: Path
+    ) -> None:
+        session_dir = ensure_session_dir(str(tmp_path))
+        artifact = persist_tool_result("old-tool", "original output", session_dir)
+        conv = _make_long_conversation()
+
+        await auto_compact(
+            conv, _SummaryClient(), context_window=200_000, session_dir=session_dir,
+            manual=True,
+        )
+
+        assert artifact.exists()
+        assert artifact.read_text(encoding="utf-8") == "original output"
+
+    async def test_full_compaction_restarts_appendix_baseline(
+        self, tmp_path: Path
+    ) -> None:
+        conv = _make_long_conversation()
+        conv.set_appendix_block("runtime", "stable")
+        assert conv.flush_appendix()
+
+        result = await auto_compact(
+            conv, _SummaryClient(), context_window=200_000, session_dir=tmp_path,
+            manual=True,
+        )
+
+        assert result is not None
+        conv.set_appendix_block("runtime", "stable")
+        assert conv.flush_appendix()
+        assert 'mode="baseline"' in conv.history[-1].content
+
     async def test_too_few_messages_degrades_to_no_compaction(
         self, tmp_path: Path
     ) -> None:
@@ -934,3 +1181,30 @@ class TestAutoCompactKeepRecent:
         assert result.boundary.summary == "PREFIX SUMMARY"
         # 保留的尾部与原样沿用下来的内容完全一致。
         assert result.boundary.keep == kept_before
+
+    async def test_repeated_hard_pressure_returns_window_rollover(self, tmp_path: Path) -> None:
+        conv = ConversationManager(
+            history=[
+                Message(
+                    role="user",
+                    content=(
+                        "本次会话延续自之前的对话，因上下文空间不足进行了压缩。\n"
+                        + "old summary "
+                        + "s" * 12_000
+                    ),
+                )
+            ]
+            + [Message(role="user", content="recent " + "r" * 16_000) for _ in range(8)]
+        )
+        conv.record_usage_anchor(input_tokens=99_000)
+        result = await auto_compact(
+            conv,
+            _SummaryClient("ROLLOVER SUMMARY"),
+            context_window=100_000,
+            session_dir=tmp_path,
+        )
+
+        assert result is not None
+        assert result.action == CompactionPolicy.WINDOW_ROLLOVER
+        assert result.boundary is not None
+        assert "新的上下文窗口" in conv.history[0].content

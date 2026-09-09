@@ -18,7 +18,6 @@ from lantu.commands.handlers.worktree import create_worktree_command
 from lantu.commands.registry import CommandRegistry
 from lantu.config import AppConfig, ProviderConfig
 from lantu.conversation import ConversationManager
-from lantu.context.repo_map import build_repo_map
 from lantu.filehistory import FileHistory
 from lantu.hooks import HookContext, HookEngine
 from lantu.memory import MemoryManager, SessionManager, load_instructions
@@ -145,14 +144,6 @@ async def _build_core(
                         network_enabled=config.sandbox.network_enabled,
                     )
 
-        repo_map_config = getattr(getattr(config, "context", None), "repo_map", None)
-        repo_map = None
-        if repo_map_config is not None and repo_map_config.enabled:
-            repo_map = build_repo_map(
-                work_dir,
-                max_tokens=repo_map_config.max_tokens,
-            )
-
         agent = Agent(
             client=client,
             registry=registry,
@@ -164,7 +155,6 @@ async def _build_core(
             memory_manager=memory_manager,
             hook_engine=hook_engine,
             session=session,
-            repo_map=repo_map,
         )
         agent.file_history = file_history
         agent.session_id = session.session_id
