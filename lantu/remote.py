@@ -39,8 +39,8 @@ from lantu.client import create_client, resolve_context_window
 from lantu.commands import CommandContext, CommandRegistry, CommandType
 from lantu.commands.handlers import register_all_commands
 from lantu.commands.parser import parse_command
-from lantu.config import MCPServerConfig, ProviderConfig, RepoMapConfig
-from lantu.context.repo_map import build_repo_map
+from lantu.config import MCPServerConfig, ProviderConfig
+from lantu.context import CompactionPolicy
 from lantu.conversation import ConversationManager
 from lantu.hooks import HookEngine
 from lantu.mcp import MCPManager
@@ -74,7 +74,6 @@ class RemoteServer:
         port: int = 18888,
         show_thinking: bool = False,
         tool_loading_mode: str = "standard",
-        repo_map_config: RepoMapConfig | None = None,
     ) -> None:
         self.providers = providers
         self._mcp_server_configs = mcp_servers or []
@@ -83,7 +82,6 @@ class RemoteServer:
         self.port = port
         self.show_thinking = show_thinking
         self.tool_loading_mode = tool_loading_mode
-        self.repo_map_config = repo_map_config or RepoMapConfig()
 
         # WebSocket 连接池（支持多客户端广播）
         self._connections: set[ServerConnection] = set()
@@ -260,7 +258,8 @@ class RemoteServer:
 
         # 工具注册表
         self.registry = create_default_registry(
-            loading_mode=self.tool_loading_mode
+            loading_mode=self.tool_loading_mode,
+            work_dir=work_dir,
         )
         self.registry.register(ToolSearchTool(self.registry, protocol=provider.protocol))
 
@@ -271,13 +270,6 @@ class RemoteServer:
         self.registry.register(load_skill_tool)
 
         # 创建 Agent
-        repo_map = None
-        if self.repo_map_config.enabled:
-            repo_map = build_repo_map(
-                work_dir,
-                max_tokens=self.repo_map_config.max_tokens,
-            )
-
         self.agent = Agent(
             client=client,
             registry=self.registry,
@@ -289,7 +281,6 @@ class RemoteServer:
             memory_manager=self.memory_manager,
             hook_engine=self.hook_engine,
             session=self.session,
-            repo_map=repo_map,
         )
         self.agent.session_id = self.session_id
 
@@ -324,6 +315,13 @@ class RemoteServer:
         manager.load_configs(self._mcp_server_configs)
         connect_result = await manager.register_all_tools(self.registry)
         self.mcp_manager = manager
+
+        code_search = self.registry.get("CodeSearch")
+        if code_search is not None and hasattr(code_search, "set_mcp_manager"):
+            code_search.set_mcp_manager(manager)
+        for tool in connect_result.tools:
+            if tool.name.startswith("mcp_zvec_grep_"):
+                self.registry.disable(tool.name)
 
         for err in connect_result.errors:
             log.warning("MCP error: %s", err)
@@ -507,11 +505,22 @@ class RemoteServer:
 
                 elif isinstance(event, CompactNotification):
                     if event.boundary is not None:
-                        self.session.context_compacted(
-                            event.boundary.summary,
-                            event.boundary.keep,
-                        )
+                        if event.action == CompactionPolicy.WINDOW_ROLLOVER:
+                            self.session.context_window_rolled_over(
+                                event.boundary.summary,
+                                event.boundary.keep,
+                                event.boundary.artifact_refs,
+                            )
+                        else:
+                            self.session.context_compacted(
+                                event.boundary.summary,
+                                event.boundary.keep,
+                            )
                         history_cursor = len(self.conversation.history)
+                    elif event.tool_result_replacements:
+                        self.session.tool_results_compacted(
+                            event.tool_result_replacements
+                        )
                     await self._broadcast({
                         "type": "compact",
                         "data": {"message": event.message},
@@ -657,17 +666,41 @@ class RemoteServer:
             "data": {"message": "Compacting conversation..."},
         })
 
-        result = await self.agent.manual_compact(self.conversation)
-        if isinstance(result, CompactNotification):
-            await self._broadcast({
-                "type": "system",
-                "data": {"message": result.message},
-            })
-        elif isinstance(result, ErrorEvent):
-            await self._broadcast({
-                "type": "error",
-                "data": {"message": result.message},
-            })
+        compact_turn = False
+        if self.session is not None and self.session.turn_id is None:
+            self.session.start_turn("notification")
+            compact_turn = True
+        try:
+            result = await self.agent.manual_compact(self.conversation)
+            if isinstance(result, CompactNotification):
+                if self.session is not None and result.boundary is not None:
+                    if result.action == CompactionPolicy.WINDOW_ROLLOVER:
+                        self.session.context_window_rolled_over(
+                            result.boundary.summary,
+                            result.boundary.keep,
+                            result.boundary.artifact_refs,
+                        )
+                    else:
+                        self.session.context_compacted(
+                            result.boundary.summary,
+                            result.boundary.keep,
+                        )
+                if self.session is not None and result.tool_result_replacements:
+                    self.session.tool_results_compacted(
+                        result.tool_result_replacements
+                    )
+                await self._broadcast({
+                    "type": "system",
+                    "data": {"message": result.message},
+                })
+            elif isinstance(result, ErrorEvent):
+                await self._broadcast({
+                    "type": "error",
+                    "data": {"message": result.message},
+                })
+        finally:
+            if compact_turn and self.session is not None and self.session.turn_id is not None:
+                self.session.complete_turn(0)
 
         await self._broadcast({"type": "command_done", "data": None})
 
