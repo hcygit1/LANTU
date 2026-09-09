@@ -48,6 +48,8 @@ function readableEvent(event) {
     'model.request.failed': `Model request failed${p.error?.message ? `: ${p.error.message}` : ''}`,
     'model.request.interrupted': 'Model request interrupted', 'usage.recorded': `Usage · ${p.input_tokens || 0} input / ${p.output_tokens || 0} output tokens`,
     'permission.decided': `Permission ${p.decision || 'decided'} · ${p.tool_name || 'tool'}`,
+    'context.tool_results_compacted': `Stale tool results compacted · ${(p.replacements || []).length} replaced`,
+    'context.window.rolled_over': `Context window rolled over · ${p.parent_window_id || '?'} → ${p.window_id || '?'}`,
     'error.occurred': `Error${p.message ? `: ${p.message}` : ''}`,
   };
   if (summaries[event.type]) return summaries[event.type];
@@ -65,8 +67,26 @@ function eventDetails(event) {
   return content ? `<p class="event-content">${esc(String(content).slice(0, 800))}</p>` : '';
 }
 
+function renderEvent(event) {
+  if (eventView === 'json') {
+    return `<article class="event"><div class="event-head"><span class="seq">#${event.sequence}</span><span class="type">${esc(event.type)}</span><span class="muted">${esc(event.timestamp)}</span></div><pre class="payload">${esc(JSON.stringify(event.payload,null,2))}</pre></article>`;
+  }
+  return `<article class="event"><div class="event-head"><span class="seq">#${event.sequence}</span><span class="type">${esc(event.type)}</span>${messageClassification(event)}<span class="muted">${esc(event.timestamp)}</span></div><strong class="event-summary">${esc(readableEvent(event))}</strong>${eventDetails(event)}<details><summary>Show fields</summary><pre class="payload">${esc(JSON.stringify(event.payload,null,2))}</pre></details></article>`;
+}
+
+function fallbackWindows(events) {
+  return [{ window_id: 'window_legacy', parent_window_id: null, start_sequence: events[0]?.sequence || 0, end_sequence: events.at(-1)?.sequence || 0, is_active: true, events }];
+}
+
+function renderWindow(window, index, total) {
+  const label = `Window ${String(index + 1).padStart(2, '0')}`;
+  const parent = window.parent_window_id ? `<span class="window-parent">from ${esc(window.parent_window_id)}</span>` : '<span class="window-parent">Session start</span>';
+  return `<details class="window-group" ${window.is_active ? 'open' : ''}><summary><span class="window-index">${label}</span><span class="window-id" title="${esc(window.window_id)}">${esc(window.window_id)}</span>${window.is_active ? '<span class="badge completed">Current</span>' : ''}<span class="window-count">${window.events.length} events</span><span class="window-range">#${window.start_sequence}–#${window.end_sequence}</span>${parent}</summary><div class="window-events">${window.events.map(renderEvent).join('')}</div></details>`;
+}
+
 function renderEvents() {
-  $('panel').innerHTML = `<div class="view-toolbar"><div><h2>Events</h2><span class="muted">${current.events.length} recorded events</span></div><div class="segmented" role="group" aria-label="Event detail format"><button data-view="readable" class="${eventView === 'readable' ? 'active' : ''}">Readable</button><button data-view="json" class="${eventView === 'json' ? 'active' : ''}">JSON</button></div></div><div class="event-list">${current.events.map(event => eventView === 'json' ? `<article class="event"><div class="event-head"><span class="seq">#${event.sequence}</span><span class="type">${esc(event.type)}</span><span class="muted">${esc(event.timestamp)}</span></div><pre class="payload">${esc(JSON.stringify(event.payload,null,2))}</pre></article>` : `<article class="event"><div class="event-head"><span class="seq">#${event.sequence}</span><span class="type">${esc(event.type)}</span>${messageClassification(event)}<span class="muted">${esc(event.timestamp)}</span></div><strong class="event-summary">${esc(readableEvent(event))}</strong>${eventDetails(event)}<details><summary>Show fields</summary><pre class="payload">${esc(JSON.stringify(event.payload,null,2))}</pre></details></article>`).join('')}</div>`;
+  const windows = current.windows?.length ? current.windows : fallbackWindows(current.events);
+  $('panel').innerHTML = `<div class="view-toolbar"><div><h2>Events</h2><span class="muted">${current.events.length} recorded events · ${windows.length} window${windows.length === 1 ? '' : 's'}</span></div><div class="segmented" role="group" aria-label="Event detail format"><button data-view="readable" class="${eventView === 'readable' ? 'active' : ''}">Readable</button><button data-view="json" class="${eventView === 'json' ? 'active' : ''}">JSON</button></div></div><div class="window-list">${windows.map((window, index) => renderWindow(window, index, windows.length)).join('')}</div>`;
   document.querySelectorAll('[data-view]').forEach(button => button.onclick = () => { eventView = button.dataset.view; renderEvents(); });
 }
 

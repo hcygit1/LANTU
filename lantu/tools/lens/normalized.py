@@ -37,6 +37,8 @@ _KINDS = {
     "turn.completed": "lifecycle",
     "turn.interrupted": "lifecycle",
     "context.compacted": "lifecycle",
+    "context.window.rolled_over": "lifecycle",
+    "context.tool_results_compacted": "lifecycle",
     "usage.recorded": "usage",
 }
 

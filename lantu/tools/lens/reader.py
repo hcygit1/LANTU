@@ -16,6 +16,7 @@ from lantu.tools.lens.dataset import export_dataset
 from lantu.tools.lens.replay import ReplayPlan, ReplayResult, build_replay_plan, execute_capture_replay
 from lantu.tools.lens.capture import CaptureStore, EvidenceLink, correlate_evidence
 from lantu.tools.lens.cache import CacheReport, build_cache_report
+from lantu.tools.lens.windows import WindowSegment, segment_windows
 
 
 class LensReader:
@@ -64,6 +65,9 @@ class LensReader:
 
     def cache_report(self, session_id: str) -> CacheReport:
         return build_cache_report(session_id, self.read(session_id))
+
+    def windows(self, session_id: str) -> list[WindowSegment]:
+        return segment_windows(self.read(session_id))
 
     def action_graphs(self, session_id: str) -> list[ActionGraph]:
         return [build_action_graph(task) for task in self.tasks(session_id)]

@@ -26,3 +26,14 @@ def test_normalize_preserves_source_and_payload() -> None:
 def test_normalize_events_keeps_order() -> None:
     results = list(normalize_events([event("turn.started", {}), event("message.created", {})]))
     assert [item.kind for item in results] == ["lifecycle", "message"]
+
+
+def test_tool_result_compaction_is_a_lifecycle_event() -> None:
+    result = normalize_event(
+        event(
+            "context.tool_results_compacted",
+            {"replacements": [{"tool_use_id": "tool_1", "content": "reference"}]},
+        )
+    )
+
+    assert result.kind == "lifecycle"

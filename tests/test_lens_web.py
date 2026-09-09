@@ -17,8 +17,22 @@ def test_lens_web_reads_session_journal(tmp_path: Path) -> None:
     assert client.get("/api/sessions").json() == [{"id": "session_a"}]
     detail = client.get("/api/session/session_a").json()
     assert detail["events"][0]["type"] == "session.created"
+    assert detail["windows"] == [
+        {
+            "window_id": "window_legacy",
+            "parent_window_id": None,
+            "start_sequence": 1,
+            "end_sequence": 2,
+            "is_active": True,
+            "events": detail["events"],
+        }
+    ]
     assert detail["actions"] == [{"task_id": "task_1", "graph": {"nodes": [], "edges": []}}]
-    assert detail["cache"] == {"session_id": "session_a", "calls": []}
+    assert detail["cache"] == {
+        "session_id": "session_a",
+        "calls": [],
+        "breakpoints_by_kind": {},
+    }
 
 
 def test_lens_web_searches_all_sessions(tmp_path: Path) -> None:

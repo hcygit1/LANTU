@@ -1,6 +1,7 @@
 """Read-only analysis primitives for LANTU sessions."""
 
 from lantu.tools.lens.normalized import NormalizedEvent, normalize_event, normalize_events
+from lantu.tools.lens.windows import WindowSegment, segment_windows
 from lantu.tools.lens.reader import LensReader
 from lantu.tools.lens.graph import EventGraph, build_event_graph
 from lantu.tools.lens.diagnosis import Finding, diagnose_graph
@@ -35,6 +36,8 @@ __all__ = [
     "NormalizedEvent",
     "normalize_event",
     "normalize_events",
+    "WindowSegment",
+    "segment_windows",
     "TaskSegment",
     "segment_tasks",
     "EventGraph",
