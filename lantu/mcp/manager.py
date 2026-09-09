@@ -117,6 +117,15 @@ class MCPManager:
 
         return client
 
+    async def call_tool(
+        self, server_name: str, tool_name: str, arguments: dict
+    ) -> object:
+        """Call a connected MCP tool without exposing it as a model tool."""
+        client = await self.get_client(server_name)
+        if client is None:
+            raise RuntimeError(f"MCP server '{server_name}' is not configured")
+        return await client.call_tool(tool_name, arguments)
+
 
     async def shutdown(self) -> None:
         for name, client in self._clients.items():

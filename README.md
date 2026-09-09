@@ -38,16 +38,9 @@ ui:
   show_thinking: false
 ```
 
-RepoMap 是可选的仓库符号索引，默认关闭。开启后会在启动时生成一次，并作为固定
-System Prompt 的后缀发送给模型；只有执行 `/repo-map refresh` 或切换 worktree
-时才会刷新：
-
-```yaml
-context:
-  repo_map:
-    enabled: true
-    max_tokens: 4000
-```
+仓库代码检索通过本地 zvec-grep MCP Server 按需完成。LANTU 不再把完整仓库地图
+注入 System Prompt；模型使用 `CodeSearch` 定位代码，再使用 `ReadFile` 验证当前
+文件内容。zvec-grep 的索引目录 `.zvec-grep/` 为本地派生数据，不提交到 Git。
 
 ## 安装与运行
 
@@ -97,4 +90,4 @@ uv run python bench/lantu_validate.py
 ```
 
 结果写入 `bench/results/lantu_validation.json` 和
-`bench/results/lantu_validation.txt`。RepoMap 在这个基线中保持关闭。
+`bench/results/lantu_validation.txt`。仓库检索统一通过 `CodeSearch`，不再维护 RepoMap。

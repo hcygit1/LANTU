@@ -149,22 +149,6 @@ class UIConfig:
 
 
 @dataclass
-class RepoMapConfig:
-    enabled: bool = False
-    max_tokens: int = 4_000
-    _explicit_fields: frozenset[str] = field(
-        default_factory=frozenset,
-        repr=False,
-        compare=False,
-    )
-
-
-@dataclass
-class ContextConfig:
-    repo_map: RepoMapConfig = field(default_factory=RepoMapConfig)
-
-
-@dataclass
 class AppConfig:
     providers: list[ProviderConfig]
     permission_mode: str = "default"
@@ -179,7 +163,6 @@ class AppConfig:
     enable_coordinator_mode: bool = False
     sandbox: SandboxAppConfig = field(default_factory=SandboxAppConfig)
     ui: UIConfig = field(default_factory=UIConfig)
-    context: ContextConfig = field(default_factory=ContextConfig)
 
 
 def _load_single_file(path: Path) -> AppConfig:
@@ -237,15 +220,6 @@ def _load_single_file(path: Path) -> AppConfig:
         _explicit_fields=ui["explicit_fields"],
     )
 
-    repo_map = validated["context"]["repo_map"]
-    context_cfg = ContextConfig(
-        repo_map=RepoMapConfig(
-            enabled=repo_map["enabled"],
-            max_tokens=repo_map["max_tokens"],
-            _explicit_fields=repo_map["explicit_fields"],
-        )
-    )
-
     return AppConfig(
         providers=providers,
         permission_mode=validated["permission_mode"],
@@ -260,7 +234,6 @@ def _load_single_file(path: Path) -> AppConfig:
         enable_coordinator_mode=validated["enable_coordinator_mode"],
         sandbox=sandbox_cfg,
         ui=ui_cfg,
-        context=context_cfg,
     )
 
 
@@ -299,11 +272,6 @@ def _merge_config(base: AppConfig, override: AppConfig) -> AppConfig:
         base.sandbox.network_enabled = True
     if "show_thinking" in override.ui._explicit_fields:
         base.ui.show_thinking = override.ui.show_thinking
-    repo_map_fields = override.context.repo_map._explicit_fields
-    if "enabled" in repo_map_fields:
-        base.context.repo_map.enabled = override.context.repo_map.enabled
-    if "max_tokens" in repo_map_fields:
-        base.context.repo_map.max_tokens = override.context.repo_map.max_tokens
     return base
 
 

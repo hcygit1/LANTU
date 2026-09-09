@@ -113,39 +113,6 @@ async def test_tools_command_rejects_change_after_first_message() -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_map_command_reports_disabled() -> None:
-    from lantu.commands.handlers.repo_map import handle_repo_map
-
-    ui = MockUI()
-    ctx = _make_context(ui=ui)
-    ctx.agent = SimpleNamespace(repo_map=None)
-
-    await handle_repo_map(ctx)
-
-    assert "未启用" in ui.messages[0]
-
-
-@pytest.mark.asyncio
-async def test_repo_map_command_refreshes_enabled_map() -> None:
-    from lantu.commands.handlers.repo_map import handle_repo_map
-    from lantu.context.repo_map import RepoMapSnapshot
-
-    ui = MockUI()
-    snapshot = RepoMapSnapshot("map", 2, 3, 4, False)
-    agent = SimpleNamespace(
-        repo_map=SimpleNamespace(snapshot=snapshot),
-        refresh_repo_map=MagicMock(return_value=snapshot),
-    )
-    ctx = _make_context(args="refresh", ui=ui)
-    ctx.agent = agent
-
-    await handle_repo_map(ctx)
-
-    agent.refresh_repo_map.assert_called_once_with()
-    assert "已刷新" in ui.messages[0]
-
-
-@pytest.mark.asyncio
 async def test_mcp_command_reads_inline_runtime_connection_state() -> None:
     from lantu.commands.handlers.mcp import handle_mcp
 
@@ -597,7 +564,7 @@ class TestRegisterAllCommands:
             "help", "compact", "clear", "plan",
             "session", "mcp", "memory", "permission",
             "sandbox", "rewind", "status", "skill", "exit",
-            "tools", "repo-map",
+            "tools",
         }
         assert names == expected
 

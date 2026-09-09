@@ -46,12 +46,18 @@ class Grep(Tool):
         except re.error as e:
             return ToolResult(output=f"Error: invalid regex: {e}", is_error=True)
 
-        glob_pattern = params.include if params.include else "**/*"
-        if not glob_pattern.startswith("**/"):
-            glob_pattern = "**/" + glob_pattern
+        if base.is_file():
+            files = [base]
+            output_root = base.parent
+        else:
+            glob_pattern = params.include if params.include else "**/*"
+            if not glob_pattern.startswith("**/"):
+                glob_pattern = "**/" + glob_pattern
+            files = sorted(base.glob(glob_pattern))
+            output_root = base
 
         results: list[str] = []
-        for file_path in sorted(base.glob(glob_pattern)):
+        for file_path in files:
             if not file_path.is_file():
                 continue
             if any(part in SKIP_DIRS for part in file_path.parts):
@@ -63,7 +69,7 @@ class Grep(Tool):
             for line_num, line in enumerate(text.splitlines(), 1):
                 match = regex.search(line)
                 if match:
-                    rel = file_path.relative_to(base).as_posix()
+                    rel = file_path.relative_to(output_root).as_posix()
                     results.append(
                         f"{rel}:{line_num}:{_format_match(line, match)}"
                     )

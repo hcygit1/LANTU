@@ -28,3 +28,16 @@ async def test_grep_keeps_short_matching_lines_unchanged(tmp_path) -> None:
     result = await Grep().execute(Params(pattern="NEEDLE", path=str(tmp_path)))
 
     assert result.output == "sample.py:1:before NEEDLE after"
+
+
+@pytest.mark.asyncio
+async def test_grep_searches_a_single_file_path(tmp_path) -> None:
+    path = tmp_path / "artifact.txt"
+    path.write_text("before\nRECOVERY_CODE=LAN20260909_X7Q4\nafter", encoding="utf-8")
+
+    result = await Grep().execute(
+        Params(pattern="RECOVERY_CODE", path=str(path))
+    )
+
+    assert not result.is_error
+    assert result.output == "artifact.txt:2:RECOVERY_CODE=LAN20260909_X7Q4"

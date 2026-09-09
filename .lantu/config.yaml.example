@@ -20,6 +20,11 @@ mcp_servers:
     command: npx
     args: ["-y", "@upstash/context7-mcp"]
 
+  # zvec-grep local search server. Start it with:
+  # zg --server on --mcp-toolset full
+  # - name: zvec_grep
+  #   url: http://127.0.0.1:7999/mcp
+
   # Streamable HTTP example (2025-03-26 spec, default when url is set):
   # - name: my-http-mcp
   #   url: https://example.com/mcp

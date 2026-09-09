@@ -279,54 +279,13 @@ def validate_ui(raw_ui: dict | None) -> dict:
     }
 
 
-def validate_context(raw_context: dict | None) -> dict:
-    """Validate context-management settings."""
-    if raw_context is None:
-        return {
-            "repo_map": {
-                "enabled": False,
-                "max_tokens": 4_000,
-                "explicit_fields": frozenset(),
-            }
-        }
-    if not isinstance(raw_context, dict):
-        raise ConfigError("'context' must be a mapping")
-
-    raw_repo_map = raw_context.get("repo_map")
-    if raw_repo_map is None:
-        raw_repo_map = {}
-    if not isinstance(raw_repo_map, dict):
-        raise ConfigError("'context.repo_map' must be a mapping")
-
-    enabled = raw_repo_map.get("enabled", False)
-    if not isinstance(enabled, bool):
-        raise ConfigError("'context.repo_map.enabled' must be a boolean")
-    max_tokens = raw_repo_map.get("max_tokens", 4_000)
-    if (
-        not isinstance(max_tokens, int)
-        or isinstance(max_tokens, bool)
-        or max_tokens <= 0
-    ):
-        raise ConfigError("'context.repo_map.max_tokens' must be a positive integer")
-
-    return {
-        "repo_map": {
-            "enabled": enabled,
-            "max_tokens": max_tokens,
-            "explicit_fields": frozenset(
-                field for field in ("enabled", "max_tokens") if field in raw_repo_map
-            ),
-        }
-    }
-
-
 def validate_config_structure(raw: object) -> dict:
     """校验的主入口。校验解析后的原始配置，返回清洗后的字典。
 
     返回的字典包含以下键：
         providers、permission_mode、mcp_servers、hooks、
         enable_fork、enable_verification_agent、worktree、
-        teammate_mode、enable_coordinator_mode、tool_loading_mode、sandbox、ui、context
+        teammate_mode、enable_coordinator_mode、tool_loading_mode、sandbox、ui
     """
     if not isinstance(raw, dict) or "providers" not in raw:
         raise ConfigError("Config must contain a 'providers' list")
@@ -351,5 +310,4 @@ def validate_config_structure(raw: object) -> dict:
         ),
         "sandbox": validate_sandbox(raw.get("sandbox")),
         "ui": validate_ui(raw.get("ui")),
-        "context": validate_context(raw.get("context")),
     }

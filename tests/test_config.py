@@ -173,65 +173,6 @@ ui:
     assert load_config(path).ui.show_thinking is True
 
 
-def test_repo_map_defaults_to_disabled(tmp_path) -> None:
-    path = tmp_path / "config.yaml"
-    path.write_text(
-        """
-providers:
-  - name: test
-    protocol: openai-compat
-    base_url: https://example.com/v1
-    model: test-model
-""".strip(),
-        encoding="utf-8",
-    )
-
-    config = load_config(path)
-
-    assert config.context.repo_map.enabled is False
-    assert config.context.repo_map.max_tokens == 4_000
-
-
-def test_repo_map_accepts_enabled_and_token_budget(tmp_path) -> None:
-    path = tmp_path / "config.yaml"
-    path.write_text(
-        """
-providers:
-  - name: test
-    protocol: openai-compat
-    base_url: https://example.com/v1
-    model: test-model
-context:
-  repo_map:
-    enabled: true
-    max_tokens: 2500
-""".strip(),
-        encoding="utf-8",
-    )
-
-    config = load_config(path)
-
-    assert config.context.repo_map.enabled is True
-    assert config.context.repo_map.max_tokens == 2_500
-
-
-def test_repo_map_rejects_invalid_token_budget() -> None:
-    with pytest.raises(ConfigError, match="context.repo_map.max_tokens"):
-        validate_config_structure(
-            {
-                "providers": [
-                    {
-                        "name": "test",
-                        "protocol": "openai-compat",
-                        "base_url": "https://example.com/v1",
-                        "model": "test-model",
-                    }
-                ],
-                "context": {"repo_map": {"max_tokens": 0}},
-            }
-        )
-
-
 def test_validate_config_rejects_non_boolean_show_thinking() -> None:
     with pytest.raises(ConfigError, match="ui.show_thinking"):
         validate_config_structure(

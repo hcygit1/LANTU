@@ -315,6 +315,7 @@ def create_default_registry(
     from lantu.tools.file_state_cache import FileStateCache
     from lantu.tools.glob import Glob
     from lantu.tools.grep import Grep
+    from lantu.tools.code_search import CodeSearch
     from lantu.tools.read_file import ReadFile
     from lantu.tools.write_file import WriteFile
 
@@ -326,7 +327,10 @@ def create_default_registry(
     registry.register(EditFile(file_cache=file_cache, file_history=file_history, file_state_cache=file_state_cache))
     registry.register(Bash())
     registry.register(Glob())
-    registry.register(Grep())
+    grep = Grep()
+    grep.expose_in_standard = False
+    registry.register(grep)
+    registry.register(CodeSearch(work_dir=work_dir, grep=grep))
     for tool in registry.list_tools():
         tool.work_dir = work_dir
     return registry
