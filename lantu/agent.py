@@ -316,6 +316,7 @@ class Agent:
         memory_manager: MemoryManager | None = None,
         hook_engine: HookEngine | None = None,
         session: Any | None = None,
+        file_ledger_enabled: bool = True,
     ) -> None:
         self.client = client
         self.registry = registry
@@ -339,6 +340,7 @@ class Agent:
         self.memory_manager = memory_manager
         self.hook_engine = hook_engine
         self.session = session
+        self.file_ledger_enabled = file_ledger_enabled
         self.file_ledger = getattr(session, "file_ledger", None) or FileLedger()
         session_epoch = getattr(session, "schema_epoch", None)
         self._schema_epoch_id = (
@@ -1270,6 +1272,8 @@ class Agent:
         for result in results:
             observation = self.file_ledger.observation(result.tool_use_id)
             if (
+                self.file_ledger_enabled
+                and
                 observation is not None
                 and self.file_ledger.is_visible(
                     observation.path,

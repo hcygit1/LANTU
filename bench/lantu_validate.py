@@ -255,6 +255,7 @@ async def run_session(
     turns: tuple[BenchTurn, ...],
     *,
     compact_after: int | None = None,
+    file_ledger_enabled: bool = True,
 ) -> dict[str, Any]:
     client = ScriptedClient(_responses(turns))
     session = BenchmarkSession()
@@ -266,6 +267,7 @@ async def run_session(
         work_dir=str(root),
         context_window=1_000_000,
         session=session,
+        file_ledger_enabled=file_ledger_enabled,
     )
     conversation = ConversationManager()
     errors: list[str] = []
@@ -345,6 +347,32 @@ def run_benchmark(root: Path, turns: int) -> dict[str, Any]:
     selected = SESSION[:turns]
     if not selected:
         raise ValueError("turns must be positive")
+    optimized = {
+        "main": asyncio.run(run_session(root, selected, file_ledger_enabled=True)),
+        "forced_compaction": asyncio.run(
+            run_session(
+                root,
+                selected,
+                compact_after=min(6, max(1, len(selected) - 1)),
+                file_ledger_enabled=True,
+            )
+        )
+        if len(selected) >= 6
+        else None,
+    }
+    baseline = {
+        "main": asyncio.run(run_session(root, selected, file_ledger_enabled=False)),
+        "forced_compaction": asyncio.run(
+            run_session(
+                root,
+                selected,
+                compact_after=min(6, max(1, len(selected) - 1)),
+                file_ledger_enabled=False,
+            )
+        )
+        if len(selected) >= 6
+        else None,
+    }
     return {
         "meta": {
             "root": str(root),
@@ -354,12 +382,8 @@ def run_benchmark(root: Path, turns: int) -> dict[str, Any]:
             "token_estimator": "serialized characters / 3.5",
             "reusable_prefix_is_prediction": True,
         },
-        "main": asyncio.run(run_session(root, selected)),
-        "forced_compaction": asyncio.run(
-            run_session(root, selected, compact_after=min(6, max(1, len(selected) - 1)))
-        )
-        if len(selected) >= 6
-        else None,
+        "baseline": baseline,
+        "optimized": optimized,
     }
 
 
@@ -368,14 +392,17 @@ def _report(data: dict[str, Any]) -> str:
         "Lantu offline cache validation",
         f"mode: {data['meta']['mode']} | RepoMap: {data['meta']['repo_map']}",
     ]
-    for name in ("main", "forced_compaction"):
-        result = data.get(name)
-        if result is None:
-            continue
-        lines.extend(
-            [
+    for variant in ("baseline", "optimized"):
+        lines.extend(["", f"[{variant}]"])
+        variant_data = data[variant]
+        for name in ("main", "forced_compaction"):
+            result = variant_data.get(name)
+            if result is None:
+                continue
+            lines.extend(
+                [
                 "",
-                f"[{name}]",
+                f"{name}",
                 f"turns: {result['turns']}",
                 f"model requests: {result['model_requests']}",
                 f"estimated prompt tokens: {result['prompt_tokens']}",
@@ -386,8 +413,13 @@ def _report(data: dict[str, Any]) -> str:
                 f"compactions: {len(result['compactions'])}",
                 f"compaction prefix recovery: {result['compaction_recovery']}",
                 f"errors: {len(result['errors'])}",
-            ]
-        )
+                ]
+            )
+    baseline = data["baseline"]["main"]
+    optimized = data["optimized"]["main"]
+    saved = baseline["prompt_tokens"] - optimized["prompt_tokens"]
+    lines.extend(["", "[ab_summary]", f"prompt tokens saved: {saved}",
+                  f"prompt token reduction: {saved / max(1, baseline['prompt_tokens']):.1%}"])
     return "\n".join(lines)
 
 
