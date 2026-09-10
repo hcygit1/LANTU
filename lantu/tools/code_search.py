@@ -135,7 +135,7 @@ class CodeSearch(Tool):
         return fallback
 
     def _rg_command(self, params: CodeSearchParams) -> str:
-        parts = ["rg", "-n", "--no-heading", "--color", "never"]
+        parts = ["rg", "-n"]
         if params.include:
             parts.extend(["-g", params.include])
         parts.extend([params.query, params.path])
