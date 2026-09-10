@@ -98,13 +98,10 @@ async def run_once(
     max_output_tokens: int,
 ) -> dict[str, Any]:
     config = load_config()
-    provider = next((item for item in config.providers if item.model == "glm-5.2"), None)
-    if provider is None:
-        provider = config.providers[0]
+    provider = config.providers[0]
     provider.reasoning_effort = reasoning_effort
     provider.max_output_tokens = max_output_tokens
     config.tool_loading_mode = mode
-    config.context.repo_map.enabled = False
 
     runtime = await build_interactive_runtime(
         config,
@@ -260,7 +257,7 @@ async def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "note": "Warm rate excludes the first model request of each run; provider cache may persist across sessions.",
         },
         "config": {
-            "model": "glm-5.2",
+            "model": provider.model,
             "mode": args.mode,
             "repo_map": False,
             "turns": args.turns,

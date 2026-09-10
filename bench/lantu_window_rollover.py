@@ -43,9 +43,7 @@ SUMMARY_MARKER = "本次会话延续自之前的对话，因上下文空间不�
 async def validate() -> dict[str, Any]:
     validation_root = Path(tempfile.mkdtemp(prefix="lantu-window-rollover-"))
     config = load_config()
-    provider = next((item for item in config.providers if item.model == "glm-5.2"), None)
-    if provider is None:
-        provider = config.providers[0]
+    provider = config.providers[0]
     provider.context_window = 100_000
     provider.reasoning_effort = "low"
     provider.max_output_tokens = 2_048

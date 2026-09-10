@@ -12,21 +12,21 @@ Lantu 是一个教学版终端 AI 编程 Agent 核心实现，重点演示 Agent
 
 ## 配置
 
-推荐把通用模型配置放在 `~/.lantu/config.yaml`。例如 DeepSeek：
+推荐把通用模型配置放在 `~/.lantu/config.yaml`。例如：
 
 ```yaml
 providers:
-  - name: deepseek
+  - name: deepseek-v4-flash
     protocol: openai-compat
-    base_url: https://api.deepseek.com
-    model: deepseek-chat
-    api_key: ${DEEPSEEK_API_KEY}
+    base_url: https://st8tp3ajl0df3n8b8l8qu.apigateway-cn-beijing.volceapi.com/v1
+    model: deepseek-v4-flash
+    api_key: ${OPENAI_API_KEY}
 ```
 
 启动前设置 API Key：
 
 ```bash
-export DEEPSEEK_API_KEY="your-api-key"
+export OPENAI_API_KEY="your-api-key"
 ```
 
 如需为单个项目调整配置，可创建项目目录下的 `.lantu/config.yaml`。每个配置文件都必须是完整、合法的配置并包含 `providers`；项目层的 `providers` 会整体替换全局 `providers`，其他支持项按现有合并规则叠加。不要求复制 `.lantu/config.yaml.example`。
