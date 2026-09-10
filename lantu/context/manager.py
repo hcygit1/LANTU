@@ -46,6 +46,7 @@ MANUAL_COMPACT_SAFETY_MARGIN = 3_000
 KEEP_RECENT_TOKENS = 10_000
 MIN_KEEP_MESSAGES = 5
 KEEP_MAX_TOKENS = 40_000
+ROLLOVER_KEEP_MAX_TOKENS = 4_000
 
 # 前缀 token 数低于此阈值时不值得做摘要——摘要往返的开销比回收的空间还大，
 # 退化为不压缩、保留原始历史（避免「压了个寂寞」）。
@@ -965,6 +966,17 @@ def _align_keep_start_to_tool_pair(messages: list[Message], keep_start: int) -> 
     return keep_start
 
 
+def _compute_rollover_keep_tail(messages: list[Message]) -> list[Message]:
+    """Keep only the final complete turn when starting a new context window."""
+    if not messages:
+        return []
+    groups = _group_messages_by_turn(messages)
+    tail = groups[-1] if groups else messages[-1:]
+    while len(tail) > 1 and sum(_message_tokens(msg) for msg in tail) > ROLLOVER_KEEP_MAX_TOKENS:
+        tail = tail[1:]
+    return list(tail)
+
+
 def _prefix_too_small_to_compact(prefix: list[Message]) -> bool:
     """当摘要 `prefix` 能回收的空间太少、不值得做时返回 True。"""
     if not prefix:
@@ -1287,26 +1299,28 @@ async def auto_compact(
         return "摘要生成失败：多次重试后仍超出上下文限制"
 
     summary = extract_summary(llm_output)
-    attachment = build_recovery_attachment(recovery, tool_schemas)
     artifact_refs = _persisted_artifact_refs(effective_history)
     # 重建 = 交接摘要(user) + 尾部原文。窗口切换会显式保留 artifact
     # 索引；完整结果仍由 Session 持有，绝不复制回新窗口。
     if not manual and policy_action == CompactionPolicy.WINDOW_ROLLOVER:
+        rollover_tail = _compute_rollover_keep_tail(effective_history)
         new_messages = build_window_rollover_messages(
             summary,
             artifact_refs=artifact_refs,
-            attachment=attachment,
-            has_keep_tail=bool(keep_tail),
+            has_keep_tail=bool(rollover_tail),
             transcript_path=transcript_path,
         )
+        boundary_keep = rollover_tail
     else:
+        attachment = build_recovery_attachment(recovery, tool_schemas)
         new_messages = build_compact_messages(
             summary,
             attachment=attachment,
             has_keep_tail=bool(keep_tail),
             transcript_path=transcript_path,
         )
-    new_messages = new_messages + list(keep_tail)
+        boundary_keep = keep_tail
+    new_messages = new_messages + list(boundary_keep)
 
     # replace_history 替换为重建后的对话并将用量锚点清零
     # （baseline_tokens / anchor_count / last_input_tokens），这是必须的：
@@ -1328,7 +1342,7 @@ async def auto_compact(
         before_tokens=before_tokens,
         boundary=CompactBoundary(
             summary=summary,
-            keep=list(keep_tail),
+            keep=list(boundary_keep),
             artifact_refs=artifact_refs,
         ),
         action=(
