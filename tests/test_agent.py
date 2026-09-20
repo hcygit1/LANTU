@@ -1009,7 +1009,9 @@ async def test_run_records_model_usage_in_session():
         events.append(event)
 
     usage_events = [event for event in events if isinstance(event, UsageEvent)]
-    assert usage_events == [UsageEvent(input_tokens=10, output_tokens=5)]
+    assert usage_events == [
+        UsageEvent(input_tokens=10, output_tokens=5, cache_read=3, cache_creation=2)
+    ]
 
     recorded = [event for event in session.events if event.event_type == "usage.recorded"]
     assert len(recorded) == 1

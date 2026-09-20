@@ -113,6 +113,8 @@ class LoopComplete:
 class UsageEvent:
     input_tokens: int
     output_tokens: int
+    cache_read: int = 0
+    cache_creation: int = 0
 
 
 @dataclass
@@ -336,6 +338,8 @@ class Agent:
         self.recovery_state: RecoveryState = RecoveryState()
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+        self.total_cache_read_tokens = 0
+        self.total_cache_creation_tokens = 0
         self.instructions_content = instructions_content
         self.memory_manager = memory_manager
         self.hook_engine = hook_engine
@@ -1177,10 +1181,14 @@ class Agent:
     def _record_usage(self, response: LLMResponse) -> UsageEvent:
         self.total_input_tokens += response.input_tokens
         self.total_output_tokens += response.output_tokens
+        self.total_cache_read_tokens += response.cache_read
+        self.total_cache_creation_tokens += response.cache_creation
 
         return UsageEvent(
             input_tokens=self.total_input_tokens,
             output_tokens=self.total_output_tokens,
+            cache_read=self.total_cache_read_tokens,
+            cache_creation=self.total_cache_creation_tokens,
         )
 
     def _record_tool_started(self, tc: ToolCallComplete) -> None:
@@ -1507,6 +1515,8 @@ class Agent:
                         "usage": {
                             "inputTokens": event.input_tokens,
                             "outputTokens": event.output_tokens,
+                            "cacheReadTokens": event.cache_read,
+                            "cacheCreationTokens": event.cache_creation,
                         },
                     })
                 flush_text_callback()

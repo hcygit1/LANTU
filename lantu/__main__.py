@@ -614,6 +614,7 @@ async def _run_prompt_with_client(
     text_buf = ""
     total_input = 0
     total_output = 0
+    total_cache = 0
     tool_calls: list[dict] = []
 
     event_stream = recorded_events()
@@ -654,11 +655,14 @@ async def _run_prompt_with_client(
         elif isinstance(event, UsageEvent):
             total_input = event.input_tokens
             total_output = event.output_tokens
+            total_cache = event.cache_read
             if is_json:
                 emit_json({
                     "type": "usage",
                     "input_tokens": event.input_tokens,
                     "output_tokens": event.output_tokens,
+                    "cache_tokens": event.cache_read,
+                    "cache_creation_tokens": event.cache_creation,
                 })
 
         elif isinstance(event, TurnComplete):
@@ -678,6 +682,7 @@ async def _run_prompt_with_client(
                     "usage": {
                         "input_tokens": total_input,
                         "output_tokens": total_output,
+                        "cache_tokens": total_cache,
                     },
                     "stop_reason": "end_turn",
                 })

@@ -17,12 +17,13 @@ def test_parse_metrics_prefers_final_result(tmp_path: Path) -> None:
     output = tmp_path / "stream.jsonl"
     output.write_text(
         '{"type":"usage","input_tokens":10,"output_tokens":2}\n'
-        '{"type":"result","duration_ms":1234,"usage":{"input_tokens":42,"output_tokens":7}}\n',
+        '{"type":"result","duration_ms":1234,"usage":{"input_tokens":42,"output_tokens":7,"cache_tokens":19}}\n',
         encoding="utf-8",
     )
 
     assert parse_metrics(output).input_tokens == 42
     assert parse_metrics(output).output_tokens == 7
+    assert parse_metrics(output).cache_tokens == 19
     assert parse_metrics(output).duration_ms == 1234
 
 
