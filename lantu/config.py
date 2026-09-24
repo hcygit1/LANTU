@@ -33,6 +33,7 @@ class ProviderConfig:
     protocol: str
     base_url: str
     model: str
+    models: list[str] = field(default_factory=list)
     api_key: str = ""
     thinking: bool = False
     reasoning_effort: str = ""
@@ -179,6 +180,7 @@ def _load_single_file(path: Path) -> AppConfig:
             protocol=p["protocol"],
             base_url=p["base_url"],
             model=p["model"],
+            models=p["models"],
             api_key=p["api_key"],
             thinking=p["thinking"],
             reasoning_effort=p["reasoning_effort"],

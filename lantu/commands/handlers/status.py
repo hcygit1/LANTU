@@ -13,6 +13,11 @@ async def handle_status(ctx: CommandContext) -> None:
 
     mode = ctx.agent.permission_mode.value if ctx.agent else "unknown"
     lines.append(f"模式: {mode}")
+    runtime = ctx.config.get("runtime")
+    if ctx.agent and runtime is not None:
+        provider = runtime.provider
+        lines.append(f"模型: {provider.model}")
+        lines.append(f"思考: {'on' if provider.thinking else 'off'}")
 
     if ctx.session:
         m = ctx.session.meta

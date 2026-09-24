@@ -564,7 +564,7 @@ class TestRegisterAllCommands:
             "help", "compact", "clear", "plan",
             "session", "mcp", "memory", "permission",
             "sandbox", "rewind", "status", "skill", "exit",
-            "tools",
+            "tools", "model", "thinking",
         }
         assert names == expected
 

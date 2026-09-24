@@ -423,6 +423,7 @@ class AnthropicClient(LLMClient):
 class OpenAIClient(LLMClient):
     def __init__(self, config: ProviderConfig) -> None:
         self.model = config.model
+        self.thinking = config.thinking
         self.max_output_tokens = config.get_max_output_tokens()
         api_key = config.resolve_api_key()
         if not api_key:
@@ -560,6 +561,7 @@ class OpenAICompatClient(LLMClient):
 
     def __init__(self, config: ProviderConfig) -> None:
         self.model = config.model
+        self.thinking = config.thinking
         self.max_output_tokens = config.get_max_output_tokens()
         self.reasoning_effort = config.reasoning_effort
         api_key = config.resolve_api_key()
@@ -625,9 +627,9 @@ class OpenAICompatClient(LLMClient):
         }
         if tools:
             kwargs["tools"] = self._convert_tools(tools)
-        if self.reasoning_effort:
+        if self.thinking or self.reasoning_effort:
             kwargs["extra_body"] = {
-                "enable_thinking": True,
+                "enable_thinking": self.thinking or bool(self.reasoning_effort),
                 "reasoning_effort": self.reasoning_effort,
             }
         _record_prepared_request(kwargs)

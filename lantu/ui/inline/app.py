@@ -578,6 +578,7 @@ class InlineApp:
                 "skill_loader": self.runtime.skill_loader,
                 "skill_executor": self.runtime.skill_executor,
                 "request_exit": self.request_exit,
+                "runtime": self.runtime,
             }
         )
         return CommandContext(

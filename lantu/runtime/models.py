@@ -61,6 +61,20 @@ class InteractiveRuntime:
     capture_process: Any = None
     _closed: bool = False
 
+    def set_model(self, model: str) -> None:
+        if model not in self.provider.models:
+            raise ValueError(f"模型不可用: {model}")
+        self.provider.model = model
+        self.client.model = model
+        self.agent.context_window = self.provider.get_context_window()
+
+    def set_thinking(self, enabled: bool) -> None:
+        self.provider.thinking = enabled
+        if hasattr(self.client, "thinking"):
+            self.client.thinking = enabled
+        if hasattr(self.client, "reasoning_effort"):
+            self.client.reasoning_effort = self.provider.reasoning_effort if enabled else ""
+
     def refresh_skills_if_needed(self) -> None:
         from lantu.runtime.lifecycle import refresh_runtime_skills
 

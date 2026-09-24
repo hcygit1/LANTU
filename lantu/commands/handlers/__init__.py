@@ -14,6 +14,8 @@ from lantu.commands.handlers.skill import SKILL_COMMAND
 from lantu.commands.handlers.rewind import REWIND_COMMAND
 from lantu.commands.handlers.status import STATUS_COMMAND
 from lantu.commands.handlers.tools import TOOLS_COMMAND
+from lantu.commands.handlers.model import MODEL_COMMAND
+from lantu.commands.handlers.thinking import THINKING_COMMAND
 from lantu.commands.registry import CommandRegistry
 
 
@@ -32,6 +34,8 @@ ALL_COMMANDS = [
     STATUS_COMMAND,
     SKILL_COMMAND,
     TOOLS_COMMAND,
+    MODEL_COMMAND,
+    THINKING_COMMAND,
 ]
 
 

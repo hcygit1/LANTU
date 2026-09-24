@@ -83,6 +83,14 @@ def validate_providers(raw_providers: list) -> list[dict]:
         if not isinstance(thinking, bool):
             raise ConfigError(f"Provider #{i + 1}: thinking must be a boolean")
 
+        models = entry.get("models", [entry["model"]])
+        if (
+            not isinstance(models, list)
+            or not models
+            or any(not isinstance(model, str) or not model for model in models)
+        ):
+            raise ConfigError(f"Provider #{i + 1}: models must be a non-empty list of strings")
+
         reasoning_effort = entry.get("reasoning_effort", "")
         if not isinstance(reasoning_effort, str) or reasoning_effort not in VALID_REASONING_EFFORTS:
             raise ConfigError(
@@ -102,6 +110,7 @@ def validate_providers(raw_providers: list) -> list[dict]:
                 "protocol": protocol,
                 "base_url": entry["base_url"],
                 "model": entry["model"],
+                "models": models,
                 "api_key": entry.get("api_key", ""),
                 "thinking": thinking,
                 "reasoning_effort": reasoning_effort,
