@@ -28,11 +28,30 @@ async def handle_help(ctx: CommandContext) -> None:
         ctx.ui.add_system_message("\n".join(lines))
         return
 
-    commands = registry.list_commands()
+    groups = {
+        "会话控制": {"clear", "compact", "session", "rewind", "exit"},
+        "权限与安全": {"permission", "sandbox", "plan"},
+        "工具与模型": {"tools", "model", "thinking", "mcp", "skill"},
+        "状态与辅助": {"status", "memory", "help"},
+    }
+    commands = {cmd.name: cmd for cmd in registry.list_commands()}
     lines = ["可用命令："]
-    for cmd in commands:
+    shown: set[str] = set()
+    for group, names in groups.items():
+        group_commands = [commands[name] for name in names if name in commands]
+        if not group_commands:
+            continue
+        lines.append("")
+        lines.append(f"{group}")
+        for cmd in sorted(group_commands, key=lambda item: item.name):
+            shown.add(cmd.name)
+            aliases_str = f"/{_format_aliases(cmd)}"
+            lines.append(f"  {aliases_str:<30} {cmd.description}")
+    for cmd in sorted(commands.values(), key=lambda item: item.name):
+        if cmd.name in shown:
+            continue
         aliases_str = f"/{_format_aliases(cmd)}"
-        lines.append(f"  {aliases_str:<24} {cmd.description}")
+        lines.append(f"  {aliases_str:<30} {cmd.description}")
     lines.append("")
     lines.append("输入 /help <命令名> 查看详细用法。")
     ctx.ui.add_system_message("\n".join(lines))

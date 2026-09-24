@@ -38,7 +38,7 @@ class InlineCompleter(Completer):
         if document.text_after_cursor and not document.text_after_cursor[0].isspace():
             return
         text = document.text_before_cursor
-        if text.startswith("/") and not any(character.isspace() for character in text):
+        if text.startswith("/"):
             for display, value in complete(self.registry, text):
                 if sanitize_terminal_text(value) != value:
                     continue

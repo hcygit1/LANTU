@@ -12,15 +12,18 @@ async def handle_tools(ctx: CommandContext) -> None:
     parts = ctx.args.split()
     if not parts or parts[0] != "mode":
         ctx.ui.add_system_message(
-            f"当前工具模式: {ctx.agent.registry.loading_mode}\n"
-            "用法: /tools mode [standard|progressive]"
+            f"工具加载模式: {ctx.agent.registry.loading_mode}\n"
+            "  standard     固定加载标准工具，保持 Schema 稳定\n"
+            "  progressive  按需加载延迟工具，减少初始 Schema\n"
+            "用法: /tools mode <模式>"
         )
         return
 
     if len(parts) == 1:
         ctx.ui.add_system_message(
-            f"当前工具模式: {ctx.agent.registry.loading_mode}\n"
-            "可选模式: standard, progressive"
+            f"工具加载模式: {ctx.agent.registry.loading_mode}\n"
+            "可选模式: standard, progressive\n"
+            "切换示例: /tools mode progressive"
         )
         return
 
