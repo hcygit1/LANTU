@@ -701,7 +701,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "filelock", specifier = ">=3.16.0" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "mcp", specifier = ">=1.12.0" },
+    { name = "mcp", specifier = "==1.27.0" },
     { name = "mitmproxy", marker = "extra == 'capture'", specifier = ">=11.0.2" },
     { name = "openai", specifier = ">=1.60.0" },
     { name = "prompt-toolkit", specifier = ">=3.0.48" },
