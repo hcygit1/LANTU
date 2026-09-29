@@ -15,7 +15,13 @@ from lantu.tools.grep import Grep, Params as GrepParams
 
 class CodeSearchParams(BaseModel):
     query: str = Field(description="Natural-language query, identifier, or regex")
-    mode: str = Field(default="auto", description="auto, semantic, or exact")
+    mode: str = Field(
+        default="exact",
+        description="exact when a known word, symbol, filename, source fragment, or "
+        "regex can answer the question; semantic for architecture, call chains, "
+        "dependencies, lifecycle, data or control flow, design rationale, or "
+        "cross-file comparisons that exact lookup alone cannot answer",
+    )
     path: str = Field(default=".", description="Directory or file to search")
     include: str = Field(default="", description="Optional filename glob")
     limit: int = Field(default=10, ge=1, le=50)
@@ -32,9 +38,12 @@ class CodeSearch(Tool):
 
     name = "CodeSearch"
     description = (
-        "Search the current repository. Use semantic mode for conceptual or "
-        "cross-file discovery and exact mode for identifiers, regex, or all matches. "
-        "Results are bounded; use ReadFile to verify current source."
+        "Search the current repository. Use exact mode when a known word, symbol, "
+        "filename, source fragment, or regex can answer the question; exact results "
+        "are exhaustive. Use semantic mode for architecture, call chains, "
+        "dependencies, lifecycle, data or control flow, design rationale, or "
+        "cross-file comparisons, when exact lookup alone cannot answer. Results are "
+        "bounded; use ReadFile to verify current source."
     )
     params_model = CodeSearchParams
     category = "read"
@@ -52,19 +61,14 @@ class CodeSearch(Tool):
     async def execute(self, params: BaseModel) -> ToolResult:
         assert isinstance(params, CodeSearchParams)
         mode = params.mode.casefold()
-        if mode not in {"auto", "semantic", "exact"}:
-            return ToolResult(output="Error: mode must be auto, semantic, or exact", is_error=True)
+        if mode not in {"semantic", "exact"}:
+            return ToolResult(output="Error: mode must be semantic or exact", is_error=True)
         if not params.query.strip():
             return ToolResult(output="Error: query cannot be empty", is_error=True)
 
-        if mode == "semantic" or (mode == "auto" and self._looks_semantic(params.query)):
+        if mode == "semantic":
             return await self._semantic(params)
         return await self._exact(params)
-
-    @staticmethod
-    def _looks_semantic(query: str) -> bool:
-        # Natural-language questions do not have a dependable exhaustive-search anchor.
-        return len(query.split()) >= 4 or any(char in query for char in "?？")
 
     async def _semantic(self, params: CodeSearchParams) -> ToolResult:
         if self._mcp_manager is None:

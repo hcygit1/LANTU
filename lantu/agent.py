@@ -472,10 +472,11 @@ class Agent:
             self._stable_system_prompt += (
                 "\n\n## Repository Search\n"
                 "This workspace may provide a local persistent code index. Use "
-                "CodeSearch for repository discovery and cross-file understanding. "
-                "Use exact mode for exhaustive literal or regex matches. Search "
-                "results are bounded and may be stale; use ReadFile to inspect "
-                "current source before making claims or edits."
+                "CodeSearch for repository search. Use exact mode when a known word, "
+                "symbol, filename, or regex can answer; use semantic mode for "
+                "architecture, call chains, dependencies, or cross-file questions "
+                "that exact lookup alone cannot answer. Results are bounded and may "
+                "be stale; use ReadFile before making claims or edits."
             )
         return self._stable_system_prompt
 

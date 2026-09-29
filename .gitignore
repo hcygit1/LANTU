@@ -13,5 +13,6 @@ jobs/
 .lantu/*
 !.lantu/config.yaml.example
 .zvec-grep/
+bench/repos/
 .claude/
 CLAUDE.md

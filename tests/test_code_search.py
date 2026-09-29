@@ -68,7 +68,7 @@ async def test_semantic_uses_zvec_search(tmp_path: Path) -> None:
     tool.set_mcp_manager(manager)
 
     result = await tool.execute(
-        CodeSearchParams(query="where are credentials validated?", mode="auto")
+        CodeSearchParams(query="where are credentials validated?", mode="semantic")
     )
 
     assert result.meta == {"backend": "zvec_grep_search", "degraded": False}

@@ -76,7 +76,7 @@ zvec-grep 本地 MCP Server 是 Python LANTU 主运行时唯一的持久化仓�
 ```json
 {
   "query": "authentication flow",
-  "mode": "auto",
+  "mode": "exact",
   "path": ".",
   "include": ["lantu/**"],
   "limit": 10,
@@ -86,15 +86,13 @@ zvec-grep 本地 MCP Server 是 Python LANTU 主运行时唯一的持久化仓�
 
 `mode` 支持：
 
-- `auto`：由稳定、可测试的规则选择后端。
+- `exact`：调用 `zvec_grep_rg`，失败后降级到现有 `Grep`。默认值。
 - `semantic`：调用 `zvec_grep_search` 的混合或向量检索。
-- `exact`：调用 `zvec_grep_rg`，失败后降级到现有 `Grep`。
 
-`auto` 路由规则：
+`mode` 由模型给出，`CodeSearch` 不按查询特征猜测后端。两个模式的判据随工具描述一起交给模型：
 
-- 自然语言描述、未知实现位置、跨文件关系、调用链、设计原因：`zvec_grep_search`。
-- 明确标识符、字符串、配置键、文件片段、正则、要求“全部出现位置”：`zvec_grep_rg`。
-- 不能可靠判断时优先混合搜索，得到锚点后再做精确搜索。
+- 已知的词、符号、文件名、源码片段、正则能够回答问题：`exact`，结果是穷举的。
+- 架构、调用链、依赖关系、生命周期、数据或控制流、设计原因、跨文件比较，精确查找单独答不出：`semantic`。
 
 不应依赖模型自行记住降级步骤。降级必须由 `CodeSearch` 内部执行。
 
@@ -172,9 +170,10 @@ This is a compact, possibly incomplete symbol index...
 ```text
 ## Repository Search
 This workspace uses a local persistent code index. Use CodeSearch for repository
-discovery and cross-file understanding. Use exact mode for exhaustive literal or
-regex matches. Search results are bounded and may be stale; use ReadFile to inspect
-current source before making claims or edits.
+search. Use exact mode when a known word, symbol, filename, or regex can answer; use
+semantic mode for architecture, call chains, dependencies, or cross-file questions
+that exact lookup alone cannot answer. Search results are bounded and may be stale;
+use ReadFile to inspect current source before making claims or edits.
 ```
 
 要求：
@@ -281,7 +280,7 @@ lantu/tools/code_search.py
 职责：
 
 - 定义稳定的 `CodeSearch` 参数和返回元数据。
-- 实现 `auto/semantic/exact` 路由。
+- 实现 `exact/semantic` 路由。
 - 调用指定 MCP Server 的原始工具名，而不是依赖模型可见包装器名称。
 - 精确查询失败时调用现有 `Grep`。
 - 统一规范化 root、glob、limit、超时、错误和 freshness。
@@ -412,7 +411,7 @@ README.md
 
 ### 10.1 单元测试
 
-- `auto` 正确区分自然语言查询和精确/穷举查询。
+- 默认 `exact`，省略 `mode` 时走精确搜索。
 - `semantic` 正确映射到 `zvec_grep_search` 参数。
 - `exact` 正确构造安全的 rg 参数，不通过 shell 执行。
 - MCP 连接失败、超时、工具缺失和错误响应触发精确搜索降级。
@@ -515,7 +514,7 @@ README.md
 
 预期执行：
 
-1. `CodeSearch(mode=auto)` 判断为语义/跨文件问题。
+1. `CodeSearch(mode=semantic)`，模型判定为语义/跨文件问题。
 2. 调用 `zvec_grep_search`，获得相关文件、符号、行段和 freshness。
 3. 模型根据结果调用 `ReadFile` 读取候选代码的当前行段。
 4. 回答以 ReadFile 内容为事实依据。
@@ -524,7 +523,7 @@ README.md
 
 预期执行：
 
-1. `CodeSearch(mode=auto)` 判断为精确穷举问题。
+1. `CodeSearch(mode=exact)`，模型判定为精确穷举问题。
 2. 调用 `zvec_grep_rg`。
 3. 若 MCP 失败，自动调用 Python Grep。
 4. 需要解释调用逻辑时，再用 `ReadFile` 读取对应位置。
