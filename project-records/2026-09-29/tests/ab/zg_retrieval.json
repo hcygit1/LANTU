@@ -1,0 +1,112 @@
+{
+  "root": "D:\\code\\LANTU",
+  "queries": 4,
+  "mcp_tools": [
+    "mcp_zvec_grep_zvec_grep_index",
+    "mcp_zvec_grep_zvec_grep_index_drop",
+    "mcp_zvec_grep_zvec_grep_index_status",
+    "mcp_zvec_grep_zvec_grep_rg",
+    "mcp_zvec_grep_zvec_grep_search",
+    "mcp_zvec_grep_zvec_grep_server_status"
+  ],
+  "baseline": [
+    {
+      "query": "where context window rollover preserves session state",
+      "mode": "semantic",
+      "backend": "rg",
+      "degraded": true,
+      "mcp_error": "",
+      "is_error": false,
+      "found": false,
+      "output_chars": 17,
+      "elapsed_ms": 29.72,
+      "preview": "No matches found."
+    },
+    {
+      "query": "how file read ranges are deduplicated after tool execution",
+      "mode": "semantic",
+      "backend": "rg",
+      "degraded": true,
+      "mcp_error": "",
+      "is_error": false,
+      "found": false,
+      "output_chars": 17,
+      "elapsed_ms": 21.7,
+      "preview": "No matches found."
+    },
+    {
+      "query": "class FileLedger",
+      "mode": "exact",
+      "backend": "rg",
+      "degraded": true,
+      "mcp_error": "",
+      "is_error": false,
+      "found": true,
+      "output_chars": 130,
+      "elapsed_ms": 21.43,
+      "preview": "D:\\code\\LANTU\\lantu\\memory\\file_ledger.py:10:class FileLedgerEntry:\nD:\\code\\LANTU\\lantu\\memory\\file_ledger.py:94:class FileLedger:"
+    },
+    {
+      "query": "window_rollover",
+      "mode": "exact",
+      "backend": "rg",
+      "degraded": true,
+      "mcp_error": "",
+      "is_error": false,
+      "found": true,
+      "output_chars": 521,
+      "elapsed_ms": 22.91,
+      "preview": "D:\\code\\LANTU\\lantu\\context\\manager.py:126:    WINDOW_ROLLOVER = \"window_rollover\"\nD:\\code\\LANTU\\lantu\\context\\manager.py:675:def build_window_rollover_messages(\nD:\\code\\LANTU\\lantu\\context\\manager.py:1051:        recommended_action = \"window_rollover_candidate\"\nD:\\code\\LANTU\\lantu\\context\\manager.py:1307:        new_messages = build_window_rollover_messages(\nD:\\code\\LANTU\\lantu\\context\\__init__.py:16:    build_window_rollover_messages,\nD:\\code\\LANTU\\lantu\\context\\__init__.py:41:    \"build_windo"
+    }
+  ],
+  "optimized": [
+    {
+      "query": "where context window rollover preserves session state",
+      "mode": "semantic",
+      "backend": "zvec_grep_search",
+      "degraded": false,
+      "mcp_error": "",
+      "is_error": false,
+      "found": true,
+      "output_chars": 4285,
+      "elapsed_ms": 221.9,
+      "preview": "freshness: fresh\n#1 [group_coverage: Q1] matchedBy=fts+vector lantu/memory/session.py:241-287\ngroups: Q1#1 (fts+vector)\noutline:\ndef context_window_rolled_over(\n        self,\n        summary: str,\n        keep: list[Message],\n        artifact_refs: list[str] | None = None,\n    ) -> JournalEvent:\n        \"\"\"Persist a new Conversation projection within the current Session.\"\"\"\n...\nmatched: 247-287\nsource:\n247\t\"\"\"Persist a new Conversation projection within the current Session.\"\"\"\n248\t        if sel"
+    },
+    {
+      "query": "how file read ranges are deduplicated after tool execution",
+      "mode": "semantic",
+      "backend": "zvec_grep_search",
+      "degraded": false,
+      "mcp_error": "",
+      "is_error": false,
+      "found": true,
+      "output_chars": 4436,
+      "elapsed_ms": 110.93,
+      "preview": "freshness: fresh\n#1 [group_coverage: Q1] matchedBy=fts+vector lantu/agent.py:1266-1339\ngroups: Q1#1 (fts+vector)\noutline:\ndef _prepare_tool_results(\n        self, results: list[ToolResultBlock]\n    ) -> list[ToolResultBlock]:\n        \"\"\"Deduplicate visible file ranges, then record what reached history.\"\"\"\n        deduplicated: list[ToolResultBlock] = []\n        deduplicated_ids: set[str] = set()\n        for result in results:\n...\nmatched: 1269-1307\nsource:\n1269\t\"\"\"Deduplicate visible file ranges"
+    },
+    {
+      "query": "class FileLedger",
+      "mode": "exact",
+      "backend": "zvec_grep_rg",
+      "degraded": false,
+      "mcp_error": "",
+      "is_error": false,
+      "found": true,
+      "output_chars": 109,
+      "elapsed_ms": 147.91,
+      "preview": "lantu/memory/file_ledger.py\n  9-80 [class FileLedgerEntry] 10:\tclass FileLedgerEntry:\n  94:\tclass FileLedger:"
+    },
+    {
+      "query": "window_rollover",
+      "mode": "exact",
+      "backend": "zvec_grep_rg",
+      "degraded": false,
+      "mcp_error": "",
+      "is_error": false,
+      "found": true,
+      "output_chars": 467,
+      "elapsed_ms": 142.91,
+      "preview": "lantu/context/__init__.py\n  16:\t    build_window_rollover_messages,\n  41:\t    \"build_window_rollover_messages\",\nlantu/context/manager.py\n  115-159 [class CompactionPolicy] 126:\t    WINDOW_ROLLOVER = \"window_rollover\"\n  675:\tdef build_window_rollover_messages(\n  1000-1069 [function analyze_context_pressure] 1051:\t        recommended_action = \"window_rollover_candidate\"\n  1305-1354 [function auto_compact] 1307:\t        new_messages = build_window_rollover_messages("
+    }
+  ]
+}

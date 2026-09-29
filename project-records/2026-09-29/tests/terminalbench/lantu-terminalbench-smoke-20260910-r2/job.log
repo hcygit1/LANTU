@@ -1,0 +1,7 @@
+Skipping image OS validation for alexgshaw/gpt2-codegolf:20251031: docker inspect returned 1
+Trial gpt2-codegolf__LvhWkA6 failed: Docker compose command failed for environment gpt2-codegolf. Command: docker compose --project-name gpt2-codegolf__lvhwka6__env --project-directory C:\Users\Xuuuuuun\.cache\harbor\tasks\jErUw39oqVKwRyjuAS6Wez\gpt2-codegolf\environment -f C:\Users\Xuuuuuun\AppData\Local\Temp\tmphkrmu_x7\gpt2-codegolf__LvhWkA6__env-docker-compose-resources.json -f C:\Users\Xuuuuuun\AppData\Roaming\uv\tools\harbor\Lib\site-packages\harbor\environments\docker\docker-compose-prebuilt.yaml -f C:\Users\Xuuuuuun\AppData\Local\Temp\tmp6qpkez5z\docker-compose-environment.json -f C:\Users\Xuuuuuun\AppData\Local\Temp\tmpkq49aeot\docker-compose-mounts.json up --detach --wait. Return code: 1. Stdout:  Image alexgshaw/gpt2-codegolf:20251031 Pulling 
+ Image alexgshaw/gpt2-codegolf:20251031 Error failed to resolve reference "docker.io/alexgshaw/gpt2-codegolf:20251031": failed to do request: Head "https://registry-1.docker.io/v2/alexgshaw/gpt2-codegolf/manifests/20251031": EOF
+Error response from daemon: failed to resolve reference "docker.io/alexgshaw/gpt2-codegolf:20251031": failed to do request: Head "https://registry-1.docker.io/v2/alexgshaw/gpt2-codegolf/manifests/20251031": EOF
+. Stderr: None. 
+Collecting main service artifacts
+Not retrying trial because the maximum number of retries has been reached

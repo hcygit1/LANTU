@@ -1,0 +1,23 @@
+ZG Agent trajectory A/B
+
+[baseline_rg]
+tasks_passed: 4/5
+elapsed_seconds: 92.827
+total_tool_calls: 32
+read_file_calls: 15
+input_tokens: 48894
+cache_read_tokens: 367104
+output_tokens: 3958
+errors: 0
+tool_calls: {'CodeSearch': 17, 'ReadFile': 15}
+
+[optimized_zg]
+tasks_passed: 4/5
+elapsed_seconds: 78.08
+total_tool_calls: 31
+read_file_calls: 12
+input_tokens: 49797
+cache_read_tokens: 378624
+output_tokens: 3382
+errors: 0
+tool_calls: {'CodeSearch': 19, 'ReadFile': 12}

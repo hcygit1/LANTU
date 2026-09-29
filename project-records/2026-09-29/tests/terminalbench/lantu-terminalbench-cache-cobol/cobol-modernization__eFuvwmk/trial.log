@@ -1,0 +1,3 @@
+Skipping image OS validation for alexgshaw/cobol-modernization:20251031: docker inspect returned 1
+Trial cobol-modernization__eFuvwmk failed: Environment start timed out after 600.0 seconds
+Collecting main service artifacts

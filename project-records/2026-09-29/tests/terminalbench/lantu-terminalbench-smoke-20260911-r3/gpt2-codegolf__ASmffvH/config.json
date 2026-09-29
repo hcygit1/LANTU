@@ -1,0 +1,16 @@
+{
+    "task": {
+        "path": "gpt2-codegolf",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "source": "terminal-bench"
+    },
+    "trial_name": "gpt2-codegolf__ASmffvH",
+    "trials_dir": "bench\\results\\terminalbench\\lantu-terminalbench-smoke-20260911-r3",
+    "agent_setup_timeout_multiplier": 3.0,
+    "agent": {
+        "name": "evals.harbor:LantuAgent",
+        "model_name": "openai/deepseek-v4-flash"
+    },
+    "job_id": "982c8fc8-f57b-42f7-8be0-b102368610f9"
+}

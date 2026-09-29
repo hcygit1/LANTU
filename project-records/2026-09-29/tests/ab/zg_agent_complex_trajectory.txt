@@ -1,0 +1,23 @@
+ZG complex Agent trajectory A/B
+paired_runs: 3
+tasks_per_run: 8
+
+[baseline]
+tasks_passed: mean=7.0 stddev=0.816 values=[8.0, 6.0, 7.0]
+elapsed_seconds: mean=290.253 stddev=39.924 values=[342.537, 282.571, 245.652]
+total_tool_calls: mean=79.333 stddev=12.97 values=[89.0, 61.0, 88.0]
+read_file_calls: mean=50.0 stddev=7.789 values=[59.0, 40.0, 51.0]
+input_tokens: mean=147047.667 stddev=13804.253 values=[153292.0, 159944.0, 127907.0]
+cache_read_tokens: mean=2054656.0 stddev=202779.15 values=[2219008.0, 2176000.0, 1768960.0]
+output_tokens: mean=18503.333 stddev=149.422 values=[18502.0, 18321.0, 18687.0]
+errors: 0
+
+[optimized]
+tasks_passed: mean=6.667 stddev=0.471 values=[6.0, 7.0, 7.0]
+elapsed_seconds: mean=273.304 stddev=4.929 values=[279.052, 267.015, 273.844]
+total_tool_calls: mean=83.333 stddev=10.873 values=[68.0, 92.0, 90.0]
+read_file_calls: mean=50.0 stddev=3.742 values=[46.0, 55.0, 49.0]
+input_tokens: mean=143908.0 stddev=10663.318 values=[150415.0, 128873.0, 152436.0]
+cache_read_tokens: mean=1976832.0 stddev=167843.877 values=[2145792.0, 1747968.0, 2036736.0]
+output_tokens: mean=19373.667 stddev=1076.228 values=[19893.0, 17875.0, 20353.0]
+errors: 0

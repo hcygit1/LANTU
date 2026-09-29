@@ -1,0 +1,20 @@
+Running command: set -euo pipefail; chmod +x /tmp/lantu-uv; rm -rf /tmp/lantu-source; mkdir -p /tmp/lantu-source; tar -xf /tmp/lantu-source.tar -C /tmp/lantu-source; timeout 300 /tmp/lantu-uv tool install --force --from /tmp/lantu-source lantu; export PATH="$HOME/.local/bin:$PATH"; lantu --help >/dev/null
+Command failed
+Trial gpt2-codegolf__CKuuatU failed: Command failed (exit 124): set -euo pipefail; chmod +x /tmp/lantu-uv; rm -rf /tmp/lantu-source; mkdir -p /tmp/lantu-source; tar -xf /tmp/lantu-source.tar -C /tmp/lantu-source; timeout 300 /tmp/lantu-uv tool install --force --from /tmp/lantu-source lantu; export PATH="$HOME/.local/bin:$PATH"; lantu --help >/dev/null
+stdout: Downloading cpython-3.13.5-linux-x86_64-gnu (download) (33.8MiB)
+ Downloading cpython-3.13.5-linux-x86_64-gnu (download)
+Resolved 48 packages in 24.15s
+   Building lantu @ file:///tmp/lantu-source
+Downloading pydantic-core (2.0MiB)
+Downloading openai (1.9MiB)
+Downloading cryptography (4.5MiB)
+Downloading pygments (1.2MiB)
+Downloading anthropic (1.2MiB)
+      Built lantu @ file:///tmp/lantu-source
+ Downloading pygments
+ Downloading anthropic
+ Downloading openai
+ Downloading pydantic-core
+
+stderr: None
+Collecting main service artifacts

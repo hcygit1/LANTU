@@ -1,0 +1,39 @@
+{
+    "id": "a40e1adb-d55d-4646-886e-c30fb8673e31",
+    "started_at": "2026-09-11T13:02:41.354909",
+    "updated_at": "2026-09-11T13:08:25.906006",
+    "finished_at": "2026-09-11T13:08:25.906006",
+    "n_total_trials": 1,
+    "stats": {
+        "n_completed_trials": 1,
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "lantu__deepseek-v4-flash__terminal-bench": {
+                "n_trials": 1,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 1.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "1.0": [
+                            "break-filter-js-from-html__HZmQc9M"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        },
+        "n_input_tokens": 53102,
+        "n_cache_tokens": 343808,
+        "n_output_tokens": 18950,
+        "cost_usd": null
+    }
+}

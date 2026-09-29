@@ -1,0 +1,784 @@
+{
+  "meta": {
+    "root": "D:\\code\\LANTU",
+    "mode": "standard",
+    "repo_map": "disabled",
+    "network": false,
+    "token_estimator": "serialized characters / 3.5",
+    "reusable_prefix_is_prediction": true
+  },
+  "baseline": {
+    "main": {
+      "turns": 12,
+      "model_requests": 24,
+      "prompt_tokens": 355363,
+      "reusable_prefix_tokens": 327034,
+      "reusable_prefix_fraction": 0.9203,
+      "duplicate_reads_avoided": 0,
+      "persisted_tool_results": 1,
+      "compactions": [],
+      "compaction_recovery": [],
+      "ledger_file_entries": 6,
+      "usage_events": 24,
+      "errors": [],
+      "requests": [
+        {
+          "kind": "model",
+          "prompt_chars": 13375,
+          "prompt_tokens": 3821,
+          "reusable_prefix_chars": 0,
+          "reusable_prefix_tokens": 0
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14043,
+          "prompt_tokens": 4012,
+          "reusable_prefix_chars": 13373,
+          "reusable_prefix_tokens": 3820
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14334,
+          "prompt_tokens": 4095,
+          "reusable_prefix_chars": 14041,
+          "reusable_prefix_tokens": 4011
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20100,
+          "prompt_tokens": 5742,
+          "reusable_prefix_chars": 14332,
+          "reusable_prefix_tokens": 4094
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20413,
+          "prompt_tokens": 5832,
+          "reusable_prefix_chars": 20098,
+          "reusable_prefix_tokens": 5742
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29122,
+          "prompt_tokens": 8320,
+          "reusable_prefix_chars": 20411,
+          "reusable_prefix_tokens": 5831
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29439,
+          "prompt_tokens": 8411,
+          "reusable_prefix_chars": 29120,
+          "reusable_prefix_tokens": 8320
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35205,
+          "prompt_tokens": 10058,
+          "reusable_prefix_chars": 29437,
+          "reusable_prefix_tokens": 8410
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35499,
+          "prompt_tokens": 10142,
+          "reusable_prefix_chars": 35203,
+          "reusable_prefix_tokens": 10058
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41320,
+          "prompt_tokens": 11805,
+          "reusable_prefix_chars": 35497,
+          "reusable_prefix_tokens": 10142
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41616,
+          "prompt_tokens": 11890,
+          "reusable_prefix_chars": 41318,
+          "reusable_prefix_tokens": 11805
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 50135,
+          "prompt_tokens": 14324,
+          "reusable_prefix_chars": 41614,
+          "reusable_prefix_tokens": 11889
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 50443,
+          "prompt_tokens": 14412,
+          "reusable_prefix_chars": 50133,
+          "reusable_prefix_tokens": 14323
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 59118,
+          "prompt_tokens": 16890,
+          "reusable_prefix_chars": 50441,
+          "reusable_prefix_tokens": 14411
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 59410,
+          "prompt_tokens": 16974,
+          "reusable_prefix_chars": 59116,
+          "reusable_prefix_tokens": 16890
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 65225,
+          "prompt_tokens": 18635,
+          "reusable_prefix_chars": 59408,
+          "reusable_prefix_tokens": 16973
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 65535,
+          "prompt_tokens": 18724,
+          "reusable_prefix_chars": 65223,
+          "reusable_prefix_tokens": 18635
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 74393,
+          "prompt_tokens": 21255,
+          "reusable_prefix_chars": 65533,
+          "reusable_prefix_tokens": 18723
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 74701,
+          "prompt_tokens": 21343,
+          "reusable_prefix_chars": 74391,
+          "reusable_prefix_tokens": 21254
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 83228,
+          "prompt_tokens": 23779,
+          "reusable_prefix_chars": 74699,
+          "reusable_prefix_tokens": 21342
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 83566,
+          "prompt_tokens": 23876,
+          "reusable_prefix_chars": 83226,
+          "reusable_prefix_tokens": 23778
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 92093,
+          "prompt_tokens": 26312,
+          "reusable_prefix_chars": 83564,
+          "reusable_prefix_tokens": 23875
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 92394,
+          "prompt_tokens": 26398,
+          "reusable_prefix_chars": 92091,
+          "reusable_prefix_tokens": 26311
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 99098,
+          "prompt_tokens": 28313,
+          "reusable_prefix_chars": 92392,
+          "reusable_prefix_tokens": 26397
+        }
+      ]
+    },
+    "forced_compaction": {
+      "turns": 12,
+      "model_requests": 24,
+      "prompt_tokens": 443203,
+      "reusable_prefix_tokens": 396765,
+      "reusable_prefix_fraction": 0.8952,
+      "duplicate_reads_avoided": 0,
+      "persisted_tool_results": 1,
+      "compactions": [
+        {
+          "turn": 6,
+          "before_tokens": 2223
+        }
+      ],
+      "compaction_recovery": [
+        {
+          "first_request_reusable_prefix_tokens": 3534,
+          "next_request_reusable_prefix_tokens": 21731
+        }
+      ],
+      "ledger_file_entries": 6,
+      "usage_events": 25,
+      "errors": [],
+      "requests": [
+        {
+          "kind": "model",
+          "prompt_chars": 13375,
+          "prompt_tokens": 3821,
+          "reusable_prefix_chars": 0,
+          "reusable_prefix_tokens": 0
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14043,
+          "prompt_tokens": 4012,
+          "reusable_prefix_chars": 13373,
+          "reusable_prefix_tokens": 3820
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14334,
+          "prompt_tokens": 4095,
+          "reusable_prefix_chars": 14041,
+          "reusable_prefix_tokens": 4011
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20100,
+          "prompt_tokens": 5742,
+          "reusable_prefix_chars": 14332,
+          "reusable_prefix_tokens": 4094
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20413,
+          "prompt_tokens": 5832,
+          "reusable_prefix_chars": 20098,
+          "reusable_prefix_tokens": 5742
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29122,
+          "prompt_tokens": 8320,
+          "reusable_prefix_chars": 20411,
+          "reusable_prefix_tokens": 5831
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29439,
+          "prompt_tokens": 8411,
+          "reusable_prefix_chars": 29120,
+          "reusable_prefix_tokens": 8320
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35205,
+          "prompt_tokens": 10058,
+          "reusable_prefix_chars": 29437,
+          "reusable_prefix_tokens": 8410
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35499,
+          "prompt_tokens": 10142,
+          "reusable_prefix_chars": 35203,
+          "reusable_prefix_tokens": 10058
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41320,
+          "prompt_tokens": 11805,
+          "reusable_prefix_chars": 35497,
+          "reusable_prefix_tokens": 10142
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41616,
+          "prompt_tokens": 11890,
+          "reusable_prefix_chars": 41318,
+          "reusable_prefix_tokens": 11805
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 50135,
+          "prompt_tokens": 14324,
+          "reusable_prefix_chars": 41614,
+          "reusable_prefix_tokens": 11889
+        },
+        {
+          "kind": "summary",
+          "prompt_chars": 44618,
+          "prompt_tokens": 12748,
+          "reusable_prefix_chars": 41328,
+          "reusable_prefix_tokens": 11808
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 76063,
+          "prompt_tokens": 21732,
+          "reusable_prefix_chars": 12370,
+          "reusable_prefix_tokens": 3534
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 84738,
+          "prompt_tokens": 24210,
+          "reusable_prefix_chars": 76061,
+          "reusable_prefix_tokens": 21731
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 85030,
+          "prompt_tokens": 24294,
+          "reusable_prefix_chars": 84736,
+          "reusable_prefix_tokens": 24210
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 90845,
+          "prompt_tokens": 25955,
+          "reusable_prefix_chars": 85028,
+          "reusable_prefix_tokens": 24293
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 91155,
+          "prompt_tokens": 26044,
+          "reusable_prefix_chars": 90843,
+          "reusable_prefix_tokens": 25955
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 100013,
+          "prompt_tokens": 28575,
+          "reusable_prefix_chars": 91153,
+          "reusable_prefix_tokens": 26043
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 100321,
+          "prompt_tokens": 28663,
+          "reusable_prefix_chars": 100011,
+          "reusable_prefix_tokens": 28574
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 108848,
+          "prompt_tokens": 31099,
+          "reusable_prefix_chars": 100319,
+          "reusable_prefix_tokens": 28662
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 109186,
+          "prompt_tokens": 31196,
+          "reusable_prefix_chars": 108846,
+          "reusable_prefix_tokens": 31098
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 117713,
+          "prompt_tokens": 33632,
+          "reusable_prefix_chars": 109184,
+          "reusable_prefix_tokens": 31195
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 118014,
+          "prompt_tokens": 33718,
+          "reusable_prefix_chars": 117711,
+          "reusable_prefix_tokens": 33631
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 124718,
+          "prompt_tokens": 35633,
+          "reusable_prefix_chars": 118012,
+          "reusable_prefix_tokens": 33717
+        }
+      ]
+    }
+  },
+  "optimized": {
+    "main": {
+      "turns": 12,
+      "model_requests": 24,
+      "prompt_tokens": 348449,
+      "reusable_prefix_tokens": 322426,
+      "reusable_prefix_fraction": 0.9253,
+      "duplicate_reads_avoided": 1,
+      "persisted_tool_results": 1,
+      "compactions": [],
+      "compaction_recovery": [],
+      "ledger_file_entries": 6,
+      "usage_events": 24,
+      "errors": [],
+      "requests": [
+        {
+          "kind": "model",
+          "prompt_chars": 13375,
+          "prompt_tokens": 3821,
+          "reusable_prefix_chars": 0,
+          "reusable_prefix_tokens": 0
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14043,
+          "prompt_tokens": 4012,
+          "reusable_prefix_chars": 13373,
+          "reusable_prefix_tokens": 3820
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14334,
+          "prompt_tokens": 4095,
+          "reusable_prefix_chars": 14041,
+          "reusable_prefix_tokens": 4011
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20100,
+          "prompt_tokens": 5742,
+          "reusable_prefix_chars": 14332,
+          "reusable_prefix_tokens": 4094
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20413,
+          "prompt_tokens": 5832,
+          "reusable_prefix_chars": 20098,
+          "reusable_prefix_tokens": 5742
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29122,
+          "prompt_tokens": 8320,
+          "reusable_prefix_chars": 20411,
+          "reusable_prefix_tokens": 5831
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29439,
+          "prompt_tokens": 8411,
+          "reusable_prefix_chars": 29120,
+          "reusable_prefix_tokens": 8320
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35205,
+          "prompt_tokens": 10058,
+          "reusable_prefix_chars": 29437,
+          "reusable_prefix_tokens": 8410
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35499,
+          "prompt_tokens": 10142,
+          "reusable_prefix_chars": 35203,
+          "reusable_prefix_tokens": 10058
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41320,
+          "prompt_tokens": 11805,
+          "reusable_prefix_chars": 35497,
+          "reusable_prefix_tokens": 10142
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41616,
+          "prompt_tokens": 11890,
+          "reusable_prefix_chars": 41318,
+          "reusable_prefix_tokens": 11805
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 50135,
+          "prompt_tokens": 14324,
+          "reusable_prefix_chars": 41614,
+          "reusable_prefix_tokens": 11889
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 50443,
+          "prompt_tokens": 14412,
+          "reusable_prefix_chars": 50133,
+          "reusable_prefix_tokens": 14323
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 59118,
+          "prompt_tokens": 16890,
+          "reusable_prefix_chars": 50441,
+          "reusable_prefix_tokens": 14411
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 59410,
+          "prompt_tokens": 16974,
+          "reusable_prefix_chars": 59116,
+          "reusable_prefix_tokens": 16890
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 65225,
+          "prompt_tokens": 18635,
+          "reusable_prefix_chars": 59408,
+          "reusable_prefix_tokens": 16973
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 65535,
+          "prompt_tokens": 18724,
+          "reusable_prefix_chars": 65223,
+          "reusable_prefix_tokens": 18635
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 74393,
+          "prompt_tokens": 21255,
+          "reusable_prefix_chars": 65533,
+          "reusable_prefix_tokens": 18723
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 74701,
+          "prompt_tokens": 21343,
+          "reusable_prefix_chars": 74391,
+          "reusable_prefix_tokens": 21254
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 83228,
+          "prompt_tokens": 23779,
+          "reusable_prefix_chars": 74699,
+          "reusable_prefix_tokens": 21342
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 83566,
+          "prompt_tokens": 23876,
+          "reusable_prefix_chars": 83226,
+          "reusable_prefix_tokens": 23778
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 84027,
+          "prompt_tokens": 24007,
+          "reusable_prefix_chars": 83564,
+          "reusable_prefix_tokens": 23875
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 84328,
+          "prompt_tokens": 24093,
+          "reusable_prefix_chars": 84025,
+          "reusable_prefix_tokens": 24007
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 91032,
+          "prompt_tokens": 26009,
+          "reusable_prefix_chars": 84326,
+          "reusable_prefix_tokens": 24093
+        }
+      ]
+    },
+    "forced_compaction": {
+      "turns": 12,
+      "model_requests": 24,
+      "prompt_tokens": 436289,
+      "reusable_prefix_tokens": 392133,
+      "reusable_prefix_fraction": 0.8988,
+      "duplicate_reads_avoided": 1,
+      "persisted_tool_results": 1,
+      "compactions": [
+        {
+          "turn": 6,
+          "before_tokens": 2223
+        }
+      ],
+      "compaction_recovery": [
+        {
+          "first_request_reusable_prefix_tokens": 3510,
+          "next_request_reusable_prefix_tokens": 21731
+        }
+      ],
+      "ledger_file_entries": 6,
+      "usage_events": 25,
+      "errors": [],
+      "requests": [
+        {
+          "kind": "model",
+          "prompt_chars": 13375,
+          "prompt_tokens": 3821,
+          "reusable_prefix_chars": 0,
+          "reusable_prefix_tokens": 0
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14043,
+          "prompt_tokens": 4012,
+          "reusable_prefix_chars": 13373,
+          "reusable_prefix_tokens": 3820
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 14334,
+          "prompt_tokens": 4095,
+          "reusable_prefix_chars": 14041,
+          "reusable_prefix_tokens": 4011
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20100,
+          "prompt_tokens": 5742,
+          "reusable_prefix_chars": 14332,
+          "reusable_prefix_tokens": 4094
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 20413,
+          "prompt_tokens": 5832,
+          "reusable_prefix_chars": 20098,
+          "reusable_prefix_tokens": 5742
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29122,
+          "prompt_tokens": 8320,
+          "reusable_prefix_chars": 20411,
+          "reusable_prefix_tokens": 5831
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 29439,
+          "prompt_tokens": 8411,
+          "reusable_prefix_chars": 29120,
+          "reusable_prefix_tokens": 8320
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35205,
+          "prompt_tokens": 10058,
+          "reusable_prefix_chars": 29437,
+          "reusable_prefix_tokens": 8410
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 35499,
+          "prompt_tokens": 10142,
+          "reusable_prefix_chars": 35203,
+          "reusable_prefix_tokens": 10058
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41320,
+          "prompt_tokens": 11805,
+          "reusable_prefix_chars": 35497,
+          "reusable_prefix_tokens": 10142
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 41616,
+          "prompt_tokens": 11890,
+          "reusable_prefix_chars": 41318,
+          "reusable_prefix_tokens": 11805
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 50135,
+          "prompt_tokens": 14324,
+          "reusable_prefix_chars": 41614,
+          "reusable_prefix_tokens": 11889
+        },
+        {
+          "kind": "summary",
+          "prompt_chars": 44618,
+          "prompt_tokens": 12748,
+          "reusable_prefix_chars": 41328,
+          "reusable_prefix_tokens": 11808
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 76063,
+          "prompt_tokens": 21732,
+          "reusable_prefix_chars": 12286,
+          "reusable_prefix_tokens": 3510
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 84738,
+          "prompt_tokens": 24210,
+          "reusable_prefix_chars": 76061,
+          "reusable_prefix_tokens": 21731
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 85030,
+          "prompt_tokens": 24294,
+          "reusable_prefix_chars": 84736,
+          "reusable_prefix_tokens": 24210
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 90845,
+          "prompt_tokens": 25955,
+          "reusable_prefix_chars": 85028,
+          "reusable_prefix_tokens": 24293
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 91155,
+          "prompt_tokens": 26044,
+          "reusable_prefix_chars": 90843,
+          "reusable_prefix_tokens": 25955
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 100013,
+          "prompt_tokens": 28575,
+          "reusable_prefix_chars": 91153,
+          "reusable_prefix_tokens": 26043
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 100321,
+          "prompt_tokens": 28663,
+          "reusable_prefix_chars": 100011,
+          "reusable_prefix_tokens": 28574
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 108848,
+          "prompt_tokens": 31099,
+          "reusable_prefix_chars": 100319,
+          "reusable_prefix_tokens": 28662
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 109186,
+          "prompt_tokens": 31196,
+          "reusable_prefix_chars": 108846,
+          "reusable_prefix_tokens": 31098
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 109647,
+          "prompt_tokens": 31327,
+          "reusable_prefix_chars": 109184,
+          "reusable_prefix_tokens": 31195
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 109948,
+          "prompt_tokens": 31413,
+          "reusable_prefix_chars": 109645,
+          "reusable_prefix_tokens": 31327
+        },
+        {
+          "kind": "model",
+          "prompt_chars": 116652,
+          "prompt_tokens": 33329,
+          "reusable_prefix_chars": 109946,
+          "reusable_prefix_tokens": 31413
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,54 @@
+Lantu offline cache validation
+mode: standard | RepoMap: disabled
+
+[baseline]
+
+main
+turns: 12
+model requests: 24
+estimated prompt tokens: 355363
+predicted reusable prefix tokens: 327034 (92.0%)
+duplicate reads avoided: 0
+persisted tool results: 1
+compactions: 0
+compaction prefix recovery: []
+errors: 0
+
+forced_compaction
+turns: 12
+model requests: 24
+estimated prompt tokens: 443203
+predicted reusable prefix tokens: 396765 (89.5%)
+duplicate reads avoided: 0
+persisted tool results: 1
+compactions: 1
+compaction prefix recovery: [{'first_request_reusable_prefix_tokens': 3534, 'next_request_reusable_prefix_tokens': 21731}]
+errors: 0
+
+[optimized]
+
+main
+turns: 12
+model requests: 24
+estimated prompt tokens: 348449
+predicted reusable prefix tokens: 322426 (92.5%)
+duplicate reads avoided: 1
+persisted tool results: 1
+compactions: 0
+compaction prefix recovery: []
+errors: 0
+
+forced_compaction
+turns: 12
+model requests: 24
+estimated prompt tokens: 436289
+predicted reusable prefix tokens: 392133 (89.9%)
+duplicate reads avoided: 1
+persisted tool results: 1
+compactions: 1
+compaction prefix recovery: [{'first_request_reusable_prefix_tokens': 3510, 'next_request_reusable_prefix_tokens': 21731}]
+errors: 0
+
+[ab_summary]
+prompt tokens saved: 6914
+prompt token reduction: 1.9%

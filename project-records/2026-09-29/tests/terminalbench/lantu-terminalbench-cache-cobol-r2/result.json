@@ -1,0 +1,39 @@
+{
+    "id": "d201ab44-acbc-4d1a-ba18-8e763f1a5a25",
+    "started_at": "2026-09-11T17:25:05.595527",
+    "updated_at": "2026-09-11T17:32:28.412153",
+    "finished_at": "2026-09-11T17:32:28.412153",
+    "n_total_trials": 1,
+    "stats": {
+        "n_completed_trials": 1,
+        "n_errored_trials": 0,
+        "n_running_trials": 0,
+        "n_pending_trials": 0,
+        "n_cancelled_trials": 0,
+        "n_retries": 0,
+        "evals": {
+            "lantu__deepseek-v4-flash__adhoc": {
+                "n_trials": 1,
+                "n_errors": 0,
+                "metrics": [
+                    {
+                        "mean": 1.0
+                    }
+                ],
+                "pass_at_k": {},
+                "reward_stats": {
+                    "reward": {
+                        "1.0": [
+                            "cobol-modernization__F9oLyu3"
+                        ]
+                    }
+                },
+                "exception_stats": {}
+            }
+        },
+        "n_input_tokens": 88089,
+        "n_cache_tokens": 914432,
+        "n_output_tokens": 30008,
+        "cost_usd": null
+    }
+}

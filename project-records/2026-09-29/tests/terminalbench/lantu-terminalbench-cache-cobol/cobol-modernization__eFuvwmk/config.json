@@ -1,0 +1,14 @@
+{
+    "task": {
+        "name": "terminal-bench/cobol-modernization",
+        "ref": "latest"
+    },
+    "trial_name": "cobol-modernization__eFuvwmk",
+    "trials_dir": "bench\\results\\terminalbench\\lantu-terminalbench-cache-cobol",
+    "agent_timeout_multiplier": 3.0,
+    "agent": {
+        "name": "evals.harbor:LantuAgent",
+        "model_name": "openai/deepseek-v4-flash"
+    },
+    "job_id": "14ddc520-d22a-48af-ab0f-eba5ef3448c1"
+}

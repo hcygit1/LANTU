@@ -1,0 +1,24 @@
+{
+    "job_name": "lantu-terminalbench-cache-20260911-r5",
+    "jobs_dir": "bench\\results\\terminalbench",
+    "agent_timeout_multiplier": 3.0,
+    "agent_setup_timeout_multiplier": 3.0,
+    "n_concurrent_trials": 1,
+    "agents": [
+        {
+            "name": "evals.harbor:LantuAgent",
+            "model_name": "openai/deepseek-v4-flash"
+        }
+    ],
+    "datasets": [
+        {
+            "name": "terminal-bench",
+            "version": "2.0",
+            "task_names": [
+                "regex-log",
+                "log-summary-date-ranges"
+            ],
+            "n_tasks": 2
+        }
+    ]
+}

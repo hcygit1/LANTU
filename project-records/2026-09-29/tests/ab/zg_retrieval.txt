@@ -1,0 +1,12 @@
+ZG retrieval A/B
+queries: 4
+
+[baseline]
+found: 2/4
+elapsed_ms: 95.76
+backends: rg, rg, rg, rg
+
+[optimized]
+found: 4/4
+elapsed_ms: 623.65
+backends: zvec_grep_search, zvec_grep_search, zvec_grep_rg, zvec_grep_rg

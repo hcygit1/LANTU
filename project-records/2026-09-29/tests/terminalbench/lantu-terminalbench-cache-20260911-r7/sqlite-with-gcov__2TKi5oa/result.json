@@ -1,0 +1,118 @@
+{
+    "id": "a1231568-f0cc-48cb-a745-1801b801ded0",
+    "task_name": "sqlite-with-gcov",
+    "trial_name": "sqlite-with-gcov__2TKi5oa",
+    "trial_uri": "file:///D:/code/LANTU/bench/results/terminalbench/lantu-terminalbench-cache-20260911-r7/sqlite-with-gcov__2TKi5oa",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "sqlite-with-gcov"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "3ad33a409e8c31fb0fe99f43044674373d9de415e4362bbfb8664f680324a968",
+    "config": {
+        "task": {
+            "path": "sqlite-with-gcov",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "sqlite-with-gcov__2TKi5oa",
+        "trials_dir": "bench\\results\\terminalbench\\lantu-terminalbench-cache-20260911-r7",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": 3.0,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": 3.0,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "evals.harbor:LantuAgent",
+            "import_path": null,
+            "model_name": "openai/deepseek-v4-flash",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "9110b0e9-9c6a-4055-9ab9-23b370e20aa2",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "lantu",
+        "version": "unknown",
+        "model_info": {
+            "name": "deepseek-v4-flash",
+            "provider": "openai"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 17313,
+        "n_cache_tokens": 61952,
+        "n_output_tokens": 2647,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": null
+    },
+    "verifier_result": null,
+    "verifier_environment_mode": "shared",
+    "exception_info": {
+        "exception_type": "AgentTimeoutError",
+        "exception_message": "Agent execution timed out after 2700.0 seconds",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\tasks.py\", line 520, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 175, in wrapper\n    return await fn(self, instruction, *args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"D:\\code\\LANTU\\evals\\harbor\\lantu_agent.py\", line 155, in run\n    await self.exec_as_agent(\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 884, in exec_as_agent\n    return await self._exec(\n           ^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\agents\\installed\\base.py\", line 835, in _exec\n    result = await environment.exec(\n             ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 1096, in exec\n    return await self._compose_exec(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 1173, in _compose_exec\n    return await self._run_docker_compose_command(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 649, in _run_docker_compose_command\n    result = await self._collect_buffered_output(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 679, in _collect_buffered_output\n    stdout_bytes, stderr_bytes = await process.communicate(input=stdin_data)\n                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\subprocess.py\", line 201, in communicate\n    stdin, stdout, stderr = await tasks.gather(stdin, stdout, stderr)\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\subprocess.py\", line 181, in _read_stream\n    output = await stream.read()\n             ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 706, in read\n    block = await self.read(self._limit)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 713, in read\n    await self._wait_for_data('read')\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 545, in _wait_for_data\n    await self._waiter\nasyncio.exceptions.CancelledError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 480, in _run_agent_phase\n    await asyncio.wait_for(\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\tasks.py\", line 519, in wait_for\n    async with timeouts.timeout(timeout):\n               ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\timeouts.py\", line 115, in __aexit__\n    raise TimeoutError from exc_val\nTimeoutError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\single_step.py\", line 77, in _run_agent\n    await self._run_agent_phase(\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 489, in _run_agent_phase\n    raise AgentTimeoutError(\nharbor.trial.errors.AgentTimeoutError: Agent execution timed out after 2700.0 seconds\n",
+        "occurred_at": "2026-09-11T06:34:53.765781Z"
+    },
+    "started_at": "2026-09-11T05:47:07.360476Z",
+    "finished_at": "2026-09-11T06:49:58.081229Z",
+    "environment_setup": {
+        "started_at": "2026-09-11T05:47:07.435120Z",
+        "finished_at": "2026-09-11T05:47:36.417474Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-09-11T05:47:36.417474Z",
+        "finished_at": "2026-09-11T05:49:53.649545Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-09-11T05:49:53.649545Z",
+        "finished_at": "2026-09-11T06:34:53.667617Z"
+    },
+    "verifier": {
+        "started_at": "2026-09-11T06:34:53.775105Z",
+        "finished_at": "2026-09-11T06:49:53.778326Z"
+    },
+    "step_results": null
+}

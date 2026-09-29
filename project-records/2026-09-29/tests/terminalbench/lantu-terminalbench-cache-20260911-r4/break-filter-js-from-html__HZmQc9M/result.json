@@ -1,0 +1,119 @@
+{
+    "id": "ff0000fa-2743-4985-bbfc-8388d1875881",
+    "task_name": "break-filter-js-from-html",
+    "trial_name": "break-filter-js-from-html__HZmQc9M",
+    "trial_uri": "file:///D:/code/LANTU/bench/results/terminalbench/lantu-terminalbench-cache-20260911-r4/break-filter-js-from-html__HZmQc9M",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "break-filter-js-from-html"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "3884d50f2e99f2afbe118f089adfb5727805cb8f60bcc9717ddd5eb02c4ec366",
+    "config": {
+        "task": {
+            "path": "break-filter-js-from-html",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "break-filter-js-from-html__HZmQc9M",
+        "trials_dir": "bench\\results\\terminalbench\\lantu-terminalbench-cache-20260911-r4",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": 3.0,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": 3.0,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "evals.harbor:LantuAgent",
+            "import_path": null,
+            "model_name": "openai/deepseek-v4-flash",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "a40e1adb-d55d-4646-886e-c30fb8673e31",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "lantu",
+        "version": "unknown",
+        "model_info": {
+            "name": "deepseek-v4-flash",
+            "provider": "openai"
+        }
+    },
+    "agent_result": {
+        "n_input_tokens": 53102,
+        "n_cache_tokens": 343808,
+        "n_output_tokens": 18950,
+        "cost_usd": null,
+        "rollout_details": null,
+        "metadata": {
+            "duration_ms": 238239
+        }
+    },
+    "verifier_result": {
+        "rewards": {
+            "reward": 1.0
+        }
+    },
+    "verifier_environment_mode": "shared",
+    "exception_info": null,
+    "started_at": "2026-09-11T05:02:41.450108Z",
+    "finished_at": "2026-09-11T05:08:25.896625Z",
+    "environment_setup": {
+        "started_at": "2026-09-11T05:02:41.517638Z",
+        "finished_at": "2026-09-11T05:02:43.650266Z"
+    },
+    "agent_setup": {
+        "started_at": "2026-09-11T05:02:43.650266Z",
+        "finished_at": "2026-09-11T05:03:20.152019Z"
+    },
+    "agent_execution": {
+        "started_at": "2026-09-11T05:03:20.153018Z",
+        "finished_at": "2026-09-11T05:07:21.676359Z"
+    },
+    "verifier": {
+        "started_at": "2026-09-11T05:07:21.688053Z",
+        "finished_at": "2026-09-11T05:08:21.800966Z"
+    },
+    "step_results": null
+}

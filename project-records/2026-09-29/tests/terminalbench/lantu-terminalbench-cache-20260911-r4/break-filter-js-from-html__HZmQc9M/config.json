@@ -1,0 +1,17 @@
+{
+    "task": {
+        "path": "break-filter-js-from-html",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "source": "terminal-bench"
+    },
+    "trial_name": "break-filter-js-from-html__HZmQc9M",
+    "trials_dir": "bench\\results\\terminalbench\\lantu-terminalbench-cache-20260911-r4",
+    "agent_timeout_multiplier": 3.0,
+    "agent_setup_timeout_multiplier": 3.0,
+    "agent": {
+        "name": "evals.harbor:LantuAgent",
+        "model_name": "openai/deepseek-v4-flash"
+    },
+    "job_id": "a40e1adb-d55d-4646-886e-c30fb8673e31"
+}

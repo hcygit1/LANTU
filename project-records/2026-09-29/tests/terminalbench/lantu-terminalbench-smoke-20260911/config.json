@@ -1,0 +1,18 @@
+{
+    "job_name": "lantu-terminalbench-smoke-20260911",
+    "jobs_dir": "bench\\results\\terminalbench",
+    "n_concurrent_trials": 1,
+    "agents": [
+        {
+            "name": "evals.harbor:LantuAgent",
+            "model_name": "openai/deepseek-v4-flash"
+        }
+    ],
+    "datasets": [
+        {
+            "name": "terminal-bench",
+            "version": "2.0",
+            "n_tasks": 1
+        }
+    ]
+}

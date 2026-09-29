@@ -1,0 +1,1428 @@
+{
+  "date": "2026-09-10",
+  "model": "deepseek-v4-flash",
+  "runs_per_variant": 3,
+  "tasks_per_run": 8,
+  "baseline": {
+    "summary": {
+      "runs": 3,
+      "tasks_passed": {
+        "values": [
+          8.0,
+          6.0,
+          7.0
+        ],
+        "mean": 7.0,
+        "stddev": 0.816
+      },
+      "elapsed_seconds": {
+        "values": [
+          342.537,
+          282.571,
+          245.652
+        ],
+        "mean": 290.253,
+        "stddev": 39.924
+      },
+      "total_tool_calls": {
+        "values": [
+          89.0,
+          61.0,
+          88.0
+        ],
+        "mean": 79.333,
+        "stddev": 12.97
+      },
+      "read_file_calls": {
+        "values": [
+          59.0,
+          40.0,
+          51.0
+        ],
+        "mean": 50.0,
+        "stddev": 7.789
+      },
+      "input_tokens": {
+        "values": [
+          153292.0,
+          159944.0,
+          127907.0
+        ],
+        "mean": 147047.667,
+        "stddev": 13804.253
+      },
+      "cache_read_tokens": {
+        "values": [
+          2219008.0,
+          2176000.0,
+          1768960.0
+        ],
+        "mean": 2054656.0,
+        "stddev": 202779.15
+      },
+      "output_tokens": {
+        "values": [
+          18502.0,
+          18321.0,
+          18687.0
+        ],
+        "mean": 18503.333,
+        "stddev": 149.422
+      },
+      "errors": 0,
+      "tasks_total_per_run": 8
+    },
+    "runs": [
+      {
+        "variant": "baseline_rg_1",
+        "model": "deepseek-v4-flash",
+        "tasks_passed": 8,
+        "tasks_total": 8,
+        "elapsed_seconds": 342.537,
+        "tool_calls": {
+          "CodeSearch": 29,
+          "Glob": 1,
+          "ReadFile": 59
+        },
+        "total_tool_calls": 89,
+        "read_file_calls": 59,
+        "input_tokens": 153292,
+        "cache_read_tokens": 2219008,
+        "output_tokens": 18502,
+        "errors": [],
+        "tasks": [
+          {
+            "task": 1,
+            "prompt": "Trace the complete path from YAML provider configuration loading to the final OpenAI-compatible chat completion request. Name the key functions and files.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/client.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 75.556,
+            "tool_calls": [
+              "CodeSearch",
+              "Glob",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace this path through the repository.\n\nI'll trace the config loading path first, starting with `config.py` and the runtime builder.\n\nNow let me look at `create_client` and the message-building functions to complete the path.\n\nNow let me read the `create_client` function and the agent's model-call flow (where chat completion is invoked).\n\nNow let me see the agent's model call site to complete the chain.\n\nLet me check the entry point where config gets loaded and passed to the runtimeNow let me see how `__main__.py` wires config → provider → build_interactive_runtime → agent.\n\nLet me verify how the client reaches the Agent and the `select_provider` step.\n\nHere's the complete path:\n\n---\n\n### 1. YAML File Loading → `lantu/config.py`\n\n**`load_config()`** (line 278) scans `~/.lantu/config.yaml`, `.lantu/config.yaml`, `.lantu/config.local.yaml` in priority order, merging layers.\n\nEach file is parsed by **`_load_single_file()`** (line 168):\n\n- `yaml.safe_load(path.read_text(...))` → raw dict\n- `validate_config_structure(raw)` (from `lantu/validator.py`) → validated dict\n- Constructs `ProviderConfig` objects (line 176-189) with fields: `name`, `protocol`, `base_url`, `model`, `api_key`, `thinking`, `reasoning_effort`, `context_window`, `max_output_tokens`\n- Returns `AppConfig` with `providers: list[ProviderConfig]` (line 152)\n\n---\n\n### 2. Runtime Bootstrap → `lantu/__main__.py` → `lantu/runtime/builder.py`\n\n**`run_inline()`** (`__main__.py:254`) calls:\n\n- **`select_provider(config.providers)`** (`lantu/ui/inline/session.py:170`) — picks one `ProviderConfig` from the list\n- **`build_interactive_runtime(config, provider, ...)`** (`lantu/runtime/builder.py:360`)\n\nInside **`_build_core()`** (`builder.py:61`):\n\n- **`create_client(provider)`** (`lantu/client.py:740`) — dispatches on `provider.protocol`:\n  - `\"anthropic\"` → `AnthropicClient(config)`\n  - `\"openai\"` → `OpenAIClient(config)`\n  - `\"openai-compat\"` → `OpenAICompatClient(config)` ← **target path**\n- **`Agent(client=client, protocol=provider.protocol, ...)`** (line 147) — wires the client into the agent\n\n---\n\n### 3. Agent Loop → `lantu/agent.py`\n\n**`Agent._run_core()`** (line 660-669) builds the model request:\n\n- `tool_schemas = self.registry.get_all_schemas(self.protocol)` — gets tool definitions\n- Wraps the client call via **`self.request_recorder.stream(client, conversation, system, tools, call_kind=\"main\")`**\n\n---\n\n### 4. Lens Instrumentation Layer → `lantu/tools/lens/request_trace.py`\n\n**`LensRequestRecorder.stream()`** (line 37) wraps the actual client call:\n\n- Records `model.request.started` event\n- Sets up `model_call_context` with `on_prepared` callback\n- Delegates to **`client.stream(conversation, system, tools)`** (line 96)\n\n---\n\n### 5. OpenAI-Compat Client → `lantu/client.py:552` (class `OpenAICompatClient`)\n\n**`OpenAICompatClient.__init__()`** (line 561):\n- Reads `config.model`, `config.get_max_output_tokens()`, `config.resolve_api_key()`\n- Creates `AsyncOpenAI(api_key=..., base_url=config.base_url)` (line 572)\n\n**`OpenAICompatClient.stream()`** (line 604):\n1. Calls **`build_chat_completion_messages(conversation.get_messages())`** (`lantu/serialization.py:99`) — converts internal `Message` objects to `[{\"role\": \"user\"/\"assistant\"/\"tool\", \"content\": ..., \"tool_calls\": ...}]` format\n2. Prepends system message if present\n3. Builds `kwargs` dict with `model`, `messages`, `max_tokens`, `stream=True`, `stream_options={\"include_usage\": True}`\n4. Converts tool schemas via `_convert_tools()` (line 578) — wraps into `{type: \"function\", function: {name, description, parameters}}`\n5. Calls **`self._client.chat.completions.create(**kwargs)`** (line 642) — the actual HTTP request\n6. Iterates streaming chunks, yielding `TextDelta`, `ThinkingDelta`, `ToolCallStart/Delta/Complete`, `StreamEnd`\n\n---\n\n### Summary Table\n\n| Step | File | Function/Class | What happens |\n|------|------|---------------|--------------|\n| 1 | `lantu/config.py:278` | `load_config()` | Loads & merges YAML files |\n| 2 | `lantu/config.py:168` | `_load_single_file()` | `yaml.safe_load`| Step | File | Function/Class | What happens |\n|------|------|---------------|--------------|\n| 1 | `lantu/config.py:278` | `load_config()` | Scans & merges YAML layers |\n| 2 | `lantu/config.py:168` | `_load_single_file()` | `yaml.safe_load` → validation → `ProviderConfig` objects |\n| 3 | `lantu/__main__.py:254` | `run_inline()` | Entry point, calls `select_provider` |\n| 4 | `lantu/ui/inline/session.py:170` | `select_provider()` | Picks one `ProviderConfig` from the list |\n| 5 | `lantu/runtime/builder.py:360` | `build_interactive_runtime()` | Orchestrates runtime construction |\n| 6 | `lantu/runtime/builder.py:87` | `_build_core()` → `create_client(provider)` | Dispatches on `provider.protocol` |\n| 7 | `lantu/client.py:740` | `create_client()` | `\"openai-compat\"` → `OpenAICompatClient` |\n| 8 | `lantu/client.py:561` | `OpenAICompatClient.__init__()` | Constructs `AsyncOpenAI(api_key, base_url)` |\n| 9 | `lantu/runtime/builder.py:147` | `Agent(client=client, ...)` | Wires client into agent |\n| 10 | `lantu/agent.py:662` | `_run_core()` → `request_recorder.stream()` | Kicks off model call |\n| 11 | `lantu/tools/lens/request_trace.py:37` | `LensRequestRecorder.stream()` | Instrumentation wrapper, delegates to `client.stream()` |\n| 12 | `lantu/client.py:604` | `OpenAICompatClient.stream()` | Builds kwargs, calls `self._client.chat.completions.create()` |\n| 13 | `lantu/serialization.py:99` | `build_chat_completion_messages()` | Converts internal `Message` → Chat Completions format |\n| 14 | `lantu/client.py:642` | `self._client.chat.completions.create(**kwargs)` | **Actual HTTP request to the OpenAI-compatible endpoint** |",
+            "errors": []
+          },
+          {
+            "task": 2,
+            "prompt": "Trace how MCP server configuration becomes a connected manager and is injected into CodeSearch at runtime.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/runtime/lifecycle.py",
+              "lantu/tools/code_search.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 40.594,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the MCP config → connected manager → CodeSearch injection path.\n\nNow let me trace where `load_configs` and `connect_all` are invoked, and how MCP tools get injected into CodeSearch.\n\nI have the complete path. Here it is:\n\n---\n\n### 1. MCP Server Config Definition → `lantu/config.py`\n\n`MCPServerConfig` dataclass (line 110) — holds `name`, `command`/`args` (stdio) or `url`/`headers` (HTTP), and `env`. Stored in `AppConfig.mcp_servers` (line 157), populated from YAML in `_load_single_file()` (line 191-201).\n\n---\n\n### 2. Config Loaded into Manager → `lantu/mcp/manager.py`\n\n**`MCPManager.load_configs()`** (line 39) — copies each `MCPServerConfig` into `self._configs: dict[str, MCPServerConfig]`.\n\n---\n\n### 3. Startup Wiring → `lantu/runtime/builder.py:356`\n\n**`initialize_runtime_mcp(runtime)`** is launched as a background task (`asyncio.create_task`) during `_build_core`.\n\n---\n\n### 4. Connect & Register → `lantu/runtime/lifecycle.py:219`\n\n**`initialize_runtime_mcp()`**:\n1. **`manager.load_configs(runtime.config.mcp_servers)`** (line 223) — feeds config in\n2. **`manager.register_all_tools(runtime.registry)`** (line 224) → calls `connect_all()`\n\n---\n\n### 5. Connect All → `lantu/mcp/manager.py:44`\n\n**`connect_all()`** — for each config name:\n- Creates `MCPClient(config)` (line 52)\n- `await client.connect()` (line 55) — establishes session\n- Wraps each tool def in `MCPToolWrapper` (line 63)\n- `register_all_tools()` then registers wrappers into the `ToolRegistry` (line 96)\n\n---\n\n### 6. Underlying Connection → `lantu/mcp/client.py:41`\n\n**`MCPClient.connect()`** — picks transport via `config.is_stdio`:\n- stdio: `_connect_stdio()` (line 74) → `stdio_client(StdioServerParameters(...))`\n- HTTP: `_connect_http()` (line 90) → `streamable_http_client(url, ...)`\n- Creates a `ClientSession`, calls `session.initialize()` (line 58) to get the InitializeResult\n\n---\n\n### 7. Injection into CodeSearch → `lantu/runtime/lifecycle.py:228-230`\n\n```python\ncode_search = runtime.registry.get(\"CodeSearch\")\nif code_search is not None and hasattr(code_search, \"set_mcp_manager\"):\n    code_search.set_mcp_manager(manager)\n```\n\nCalls **`CodeSearch.set_mcp_manager()`** (`lantu/tools/code_search.py:49`), which stores the manager in `self._mcp_manager`. The `mcp_zvec_grep_*` wrappers are then hidden from the model via `registry.disable()` (line 233-235) since CodeSearch owns the routing.\n\n---\n\n### 8. CodeSearch uses the manager → `lantu/tools/code_search.py`\n\n- `_semantic()` (line 69): if `_mcp_manager` is set, calls **`self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", ...)`** (line 82)\n- `_exact()` (line 115): routes through **`call_tool(\"zvec_grep\", \"zvec_grep_rg\", ...)`** (line 123)\n- Both fall back to local `rg` / built-in `Grep` on failure\n\n---\n\n### Summary\n\n| Step | File | Function |\n|------|------|----------|\n| Config | `lantu/config.py:110,191` | `MCPServerConfig`, populated from YAML |\n| Load | `lantu/mcp/manager.py:39` | `load_configs()` |\n| Bootstrap | `lantu/runtime/builder.py:356` | `asyncio.create_task(initialize_runtime_mcp)` |\n| Orchestrate | `lantu/runtime/lifecycle.py:219` | `initialize_runtime_mcp()` |\n| Connect | `lantu/mcp/manager.py:44` | `connect_all()` → `register_all_tools()` |\n| Transport | `lantu/mcp/client.py:41` | `MCPClient.connect()` (stdio/HTTP) |\n| Inject | `lantu/runtime/lifecycle.py:230` → `lantu/tools/code_search.py:49` | `set_mcp_manager(manager)` |\n| Use | `lantu/tools/code_search.py:82,123` | `call_tool(\"zvec_grep\", ...)` |",
+            "errors": []
+          },
+          {
+            "task": 3,
+            "prompt": "Explain how FileLedger state changes after ReadFile, after EditFile, and after a Session resume. Cite the implementation files.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/file_ledger.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 53.699,
+            "tool_calls": [
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the FileLedger's state transitions across these three scenarios.\n\nNow let me find where the ledger is wired into ReadFile, EditFile, and session resume.\n\nNow let me read the rest of `_record_file_ledger_event` (the EditFile/WriteFile path) and the session resume code.\n\nI have everything I need. Here's the FileLedger state-change analysis:\n\n---\n\n### Core data structure — `lantu/memory/file_ledger.py`\n\n`FileLedger` maintains three stores (`__init__`, line 101):\n- **`_entries`**: dict `path → FileLedgerEntry` (latest durable state per file)\n- **`_observations`**: dict `tool_call_id → FileReadObservation` (exact version + requested range)\n- **`_visible_ranges`**: dict `(path, content_hash) → merged line ranges`\n\nState changes flow through **`_record_file_ledger_event()`** (`lantu/agent.py:1341`), called after each successful tool execution (`lantu/agent.py:986`).\n\n---\n\n### After ReadFile\n\nAt `_record_file_ledger_event` (`lantu/agent.py:1341`):\n- `operation = \"read\"` (line 1365), `offset`/`limit` taken from ReadFile args (line 1369-1370)\n- **`ledger.invalidate(path)` is NOT called** (only runs for `operation != \"read\"`, line 1380)\n- **`FileLedger.build_entry(...)`** (line 1383) hashes the file content and stores it\n- **`ledger.apply(entry)`** (line 1394) → **`apply()`** (`file_ledger.py:136`): overwrites `_entries[path]`, and since `operation == \"read\"`, also records `_observations[tool_call_id]` (line 138-145)\n\n**Result:** latest entry updated + a persistent `FileReadObservation` added. No `_visible_ranges` change yet (those get marked later via `mark_visible`).\n\n---\n\n### After EditFile\n\nSame function (`lantu/agent.py:1341`):\n- `operation = \"edit\"` (line 1366), `offset`/`limit` forced to `0`/`None` (line 1369-1370)\n- **`ledger.invalidate(path)`** runs first (line 1380-1381) → **`invalidate()`** (`file_ledger.py:201`) deletes every `_visible_ranges` entry keyed by that path\n- `build_entry` re-hashes the **new** file content; **`ledger.apply(entry)`** (line 1394) overwrites `_entries[path]`\n- Since operation is `\"edit\"`, **no** `_observations` entry is added\n- Records a `\"file.updated\"` journal event (line 1392) instead of `\"file.observed\"`\n\n**Result:** entry replaced with the new version, all prior visible ranges for that path dropped (staleness invalidation), no observation recorded.\n\n---\n\n### After a Session resume\n\n`SessionManager.resume()` (`lantu/memory/session.py:397`):\n- Reads the journal, then builds the ledger via **`_file_ledger_from_events(events)`** (line 418, defined at line 761)\n- That function iterates all `JournalEvent`s, keeping only `\"file.observed\"` / `\"file.updated\"` events and calls **`ledger.apply_payload(event.payload)`** (line 767) → **`apply_payload()`** (`file_ledger.py:147`) → `apply()`\n\n**Result:** `_entries` and `_observations` are fully replayed from durable journal events (they were persisted in `_record_file_ledger_event` via `session.record`, `lantu/agent.py:1393`). **`_visible_ranges` stays empty** — it's only a volatile projection of the current conversation (`file_ledger.py:97-99`), rebuilt during active turns via `mark_visible()` and cleared on compact/rollover.\n\n---\n\n### Summary\n\n| Scenario | `_entries` | `_observations` | `_visible_ranges` |\n|----------|-----------|-----------------|-------------------|\n| ReadFile | updated (apply) | **added** (read) | unchanged |\n| EditFile | replaced + hash refresh (apply) | unchanged | **cleared for path** (invalidate) |\n| Session resume | replayed (apply_payload) | replayed | **empty** (volatile, not persisted) |",
+            "errors": []
+          },
+          {
+            "task": 4,
+            "prompt": "Trace the decision path from context pressure measurement through stale tool cleanup and structured compaction to window rollover.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 50.194,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Now let me examine the pressure measurement functions and window rollover helpers.\n\nI have the complete decision path. Here it is:\n\n---\n\n## Context Decision Path: Pressure → Stale Cleanup → Compaction → Rollover\n\nAll core logic lives in **`lantu/context/manager.py`**, driven from the agent loop.\n\n---\n\n### 1. Entry & Trigger → `lantu/agent.py:624`\n\n**`auto_compact(...)`** is invoked each agent iteration in `_run_core()` (`lantu/agent.py:624`), passing `at_user_boundary` and context state.\n\n---\n\n### 2. Pressure Measurement → `lantu/context/manager.py`\n\nInside **`auto_compact()`** (line 1132):\n- **`conversation.current_tokens()`** (line 1152) — usage anchor + char-estimated tail\n- **`analyze_context_pressure(...)`** (line 1153, defined at 1000) classifies pressure without mutating history:\n  - Computes `keep_start`, splits old vs recent, sums stale-tool / summary / conversation tokens (line 1006-1026)\n  - Classifies via dual thresholds (line 1030-1035): `\"none\"` / `\"soft\"` / `\"hard\"`\n  - Sets `recommended_action` (line 1046-1055): `compact_stale_tools`, `structured_summary`, or `window_rollover_candidate`\n\n---\n\n### 3. Threshold Gate → `lantu/context/manager.py:1163-1178`\n\n- **`compute_compact_threshold(context_window, manual=False)`** (line 576) → soft threshold (~13K margin)\n- Hard threshold via `manual=True` (~3K margin) (line 1171)\n- Below soft → return `None`; between soft/hard → honor `CompactCircuitBreaker`; at/over hard → forced compaction (line 1172-1178)\n\n---\n\n### 4. Policy Decision → `CompactionPolicy.decide()` (`lantu/context/manager.py:128`)\n\nPure decision logic (called at line 1180):\n- `\"none\"` → `NONE`\n- not at user boundary → `DEFER`\n- `hard` + existing summary → `WINDOW_ROLLOVER` (line 150)\n- `recommended_action == compact_stale_tools` → `COMPACT_STALE_TOOLS` (line 153)\n- `soft` + cache healthy → `DEFER` (line 156)\n- else → `STRUCTURED_SUMMARY` (line 159)\n\n---\n\n### 5. Branch A: Stale Tool Cleanup → `lantu/context/manager.py:1191-1220`\n\nIf `COMPACT_STALE_TOOLS`:\n- **`compact_stale_tool_results(history, keep_start, session_dir)`** (line 1193, defined at 162) evicts old tool previews before `keep_start`, replacing them with persisted-file references (`PERSISTED_TAG`); oversized inline results are persisted first (line 196-199)\n- On change, `conversation.replace_history_preserving_runtime(...)` (line 1214) and returns a `CompactEvent` with `action=COMPACT_STALE_TOOLS` and `tool_result_replacements`\n\n---\n\n### 6. Branch B: Structured Compaction → `lantu/context/manager.py:1222-1354`\n\nFor summary paths:\n- `_compute_keep_start_index()` splits prefix to summarize vs kept tail (line 1232)\n- `_prefix_too_small_to_compact()` bails if savings aren't worth it (line 1238)\n- LLM generates the summary via a **compaction model call** (`call_kind=\"compaction\"`, line 1264), with retry/backoff on context-too-long (line 1253-1291)\n- **`extract_summary(llm_output)`** (line 1301), **`_persisted_artifact_refs()`** (line 1302) collect artifact index\n\n---\n\n### 7. Branch B decision: Rollover vs Keep-Tail rebuild → `lantu/context/manager.py:1305-1323`\n\n- If `policy_action == WINDOW_ROLLOVER`:\n  - **`_compute_rollover_keep_tail()`** (line 969) keeps only the final complete turn within `ROLLOVER_KEEP_MAX_TOKENS`\n  - **`build_window_rollover_messages(summary, artifact_refs, ...)`** (line 675) builds a fresh window-opening message that references the old window in the Journal\n  - `action = WINDOW_ROLLOVER` (line 1348-1351)\n- Else: `build_recovery_attachment()` + `build_compact_messages()` rebuild the same window; `action = STRUCTURED_SUMMARY`\n- Both append `boundary_keep` tail (line 1323), then **`conversation.replace_history(new_messages)`** (line 1330) resets the token anchor\n\n---\n\n### 8. Persist boundary → `lantu/ui/inline/app.py:400`\n\n**`persist_compact_boundary()`** reacts to the `CompactNotification`:\n- `WINDOW_ROLLOVER` → `session.context_window_rolled_over(summary, keep, artifact_refs)` (line 404)\n- else → `session.context_compacted(summary, keep)` (line 410)\n- stale-tool only → `session.tool_results_compacted(...)` (line 412)\n\n---\n\n### Summary Table\n\n| Stage | File | Function |\n|-------|------|----------|\n| Trigger | `lantu/agent.py:624` | `_run_core()` calls `auto_compact` |\n| Pressure | `lantu/context/manager.py:1000` | `analyze_context_pressure()` |\n| Threshold | `lantu/context/manager.py:576` | `compute_compact_threshold()` |\n| Policy | `lantu/context/manager.py:128` | `CompactionPolicy.decide()` |\n| Stale cleanup | `lantu/context/manager.py:162` | `compact_stale_tool_results()` |\n| Summary | `lantu/context/manager.py:1301` | `extract_summary()` + LLM call |\n| Rollover | `lantu/context/manager.py:969,675` | `_compute_rollover_keep_tail` / `build_window_rollover_messages` |\n| Rewrite | `lantu/context/manager.py:1330` | `conversation.replace_history()` |\n| Persist | `lantu/ui/inline/app.py:400` | `persist_compact_boundary()` |\n\n**Core decision:** `analyze_context_pressure` measures and recommends → `auto_compact` gates on dual thresholds → `CompactionPolicy.decide` chooses the least disruptive action (stale-evict < summary < rollover) → executes it and hands the boundary to the Session for durable persistence.",
+            "errors": []
+          },
+          {
+            "task": 5,
+            "prompt": "Explain how an oversized tool result is persisted, previewed in Conversation, and later made recoverable. Cite the relevant functions.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 42.64,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch"
+            ],
+            "answer": "I'll trace the oversized tool-result persistence flow. Let me find the key functions.\n\nNow let me look at how the compact boundary preserves references to these persisted artifacts, and how they're recovered.\n\nLet me check how artifacts survive compaction and remain recoverable.\n\n\n\nHere's the end-to-end flow for oversized tool results:\n\n---\n\n### Phase 1: Persist + Preview — `lantu/context/manager.py`\n\n**Entry point at agent loop** (`lantu/agent.py:1299`): after tool execution, **`prepare_tool_results_with_metadata()`** (line 443) finalizes results before adding them to conversation history.\n\nTwo persistence triggers exist in that function:\n\n**Trigger A — single result too large** (line 468-474):\n```python\nif len(content) > TOOL_RESULT_INLINE_CHAR_LIMIT:\n    path = persist_tool_result(result.tool_use_id, content, session_dir)\n    content = make_persisted_preview(content, path)\n```\n- Threshold: `TOOL_RESULT_INLINE_CHAR_LIMIT = 8,192` chars (line 23)\n- **`persist_tool_result(tool_use_id, content, session_dir)`** (line 288): writes the full content to `{session_dir}/{tool_use_id}.txt` using `O_EXCL` atomic create\n- **`make_persisted_preview(content, path)`** (line 299): builds a preview string tagged with `PERSISTED_TAG = \"<persisted-output>\"` (line 55), containing the file path, a head-tail preview (4KB head + 1KB tail via `make_head_tail_preview()`, line 339), and the closing `</persisted-output>` tag\n\n**Trigger B — aggregate too large** (line 507-535): if the sum of all non-file-read results exceeds `AGGREGATE_CHAR_LIMIT`, the largest individual results are re-persisted with a shorter preview, reducing total inline burden.\n\n**The preview replaces the raw content** in the `ToolResultBlock` (line 481-487) — what the model sees is the tagged preview, not the full output.\n\n---\n\n### Phase 2: Conversation holds the preview\n\nThe preview (with `PERSISTED_TAG`, file path, and head/tail excerpt) is stored inline in `conversation.history` as the tool result's `.content`. The raw content lives **only on disk** at `{session_dir}/{tool_use_id}.txt`.\n\n---\n\n### Phase 3: Recovery paths\n\n**Path A — stale-tool compaction** (`compact_stale_tool_results()`, line 162):\n- Scans old (pre-`keep_start`) tool results for `PERSISTED_TAG` (line 190)\n- Extracts file path via regex `完整内容已保存到：\\n([^\\n]+)` (line 177)\n- Calls **`make_persisted_reference(path)`** (line 330) — a minimal reference with just the tag + path, no preview body\n- Layering: if a result wasn't yet persisted but exceeds `TOOL_RESULT_INLINE_CHAR_LIMIT`, it's persisted on-the-spot (line 196) then reduced\n\n**Path B — structured compaction / window rollover** (`auto_compact()`, line 1302):\n- **`_persisted_artifact_refs(effective_history)`** (line 707) regex-scans all messages for `完整内容已保存到：\\n([^\\n]+)`, collecting a deduplicated list of artifact paths\n- This list is embedded in the new compacted messages via `build_compact_messages` or `build_window_rollover_messages` (line 689-693), as a bullet list under the heading \"## 历史工具结果索引\"\n\n**User/Model recovery at any time**: the model sees the file path in the preview/reference and can call **ReadFile** to read the `.txt` file from disk. No recovery-specific machinery beyond the on-disk file and the path reference in the conversation.\n\n---\n\n### Summary\n\n| Stage | File | Function |\n|-------|------|----------|\n| Threshold | `lantu/context/manager.py:23` | `TOOL_RESULT_INLINE_CHAR_LIMIT = 8_192` |\n| Persist to disk | `lantu/context/manager.py:288` | `persist_tool_result()` → `{session_dir}/{tool_use_id}.txt` |\n| Build preview | `lantu/context/manager.py:299` | `make_persisted_preview()` |\n| Preview builder | `lantu/context/manager.py:339` | `make_head_tail_preview()` |\n| Minimal reference | `lantu/context/manager.py:330` | `make_persisted_reference()` |\n| Orchestration | `lantu/context/manager.py:443` | `prepare_tool_results_with_metadata()` |\n| Agent caller | `lantu/agent.py:1299` | calls `prepare_tool_results_with_metadata()` |\n| Stale eviction | `lantu/context/manager.py:162` | `compact_stale_tool_results()` |\n| Artifact index | `lantu/context/manager.py:707` | `_persisted_artifact_refs()` → preserves file paths across compaction |\n| Recovery | — | model/non-model callers **ReadFile** the `.txt` path from disk |",
+            "errors": []
+          },
+          {
+            "task": 6,
+            "prompt": "Trace how a tool schema view is recorded as a Schema Epoch and how that state is persisted for later requests or resume.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 36.923,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the Schema Epoch flow. Let me find the relevant code.\n\nNow I have the full trace. Here it is:\n\n---\n\n### Phase 1: Epoch Snapshot — `lantu/tools/__init__.py`\n\n**`ToolRegistry.schema_epoch(protocol)`** (line 279) computes the stable identity of the current tool-schema view:\n1. Calls `self.get_all_schemas(protocol)` to get all visible tool schemas\n2. Builds a `schema_states` list with each tool's `name` + `_schema_hash(schema)` (line 282-288)\n3. Hashes the whole canonical dict (protocol, loading_mode, schemas, deferred_tools) into a **fingerprint** via `_schema_hash()` (line 296)\n4. Returns a `SchemaEpoch` dataclass (line 15) with `epoch_id = f\"schema-{fingerprint[:16]}\"`\n\n---\n\n### Phase 2: Record on Change — `lantu/agent.py`\n\n**`_sync_schema_epoch()`** (line 1122), called before each model request at `_run_core()` (line 661):\n\n1. Fetches current epoch from registry (line 1124)\n2. If `epoch_id` unchanged → returns immediately (line 1125)\n3. If changed: builds a payload with `epoch_id`, `previous_epoch_id`, `reason` (initial/mode_changed/tool_loaded/schema_changed) (line 1130-1140)\n4. Persists via **`self.session.record(ExecutionEvent(\"tool.schema.epoch.changed\", payload))`** (line 1145-1146) — writes to the Session Journal (NDJSON)\n5. Updates `self._schema_epoch_id` (line 1148)\n\n---\n\n### Phase 3: Forwarded to Model Request — `lantu/tools/lens/request_trace.py`\n\nIn `LensRequestRecorder.stream()` (line 37), the `schema_epoch_id` is carried into the `common` metadata (line 57-58):\n```python\nif schema_epoch_id:\n    common[\"schema_epoch_id\"] = schema_epoch_id\n```\nThis attaches to `model.request.started`, `model.request.prepared`, `model.request.completed`, and `model.request.failed` events (lines 66, 79, 127, 116). The session also caches it in `self.schema_epoch` on each change (`lantu/memory/session.py:200-201`).\n\n---\n\n### Phase 4: Persistence in Journal — `lantu/memory/session.py`\n\nThe `\"tool.schema.epoch.changed\"` `ExecutionEvent` is appended to the session's NDJSON journal (via `session.record()`, `session.py:200`). Two side effects:\n\n- **`self.schema_epoch = dict(event.payload)`** (line 201) — in-memory cache for querying\n- **`session.meta` stores a snapshot** via `_save_meta_cache()` on change (the meta blob includes `schema_epoch` at line 278)\n\n---\n\n### Phase 5: Resume — `lantu/memory/session.py`\n\n`SessionManager.resume()` (line 397):\n- **`_schema_epoch_from_events(events)`** (line 771) replays the journal to find the last `\"tool.schema.epoch.changed\"` event, returning its payload (line 771-777)\n- The result is passed as `schema_epoch=...` into the resumed `Session` constructor (line 419)\n- The resumed model request uses this to attach the epoch ID to its Lens instrumentation\n\nSimilarly, deferred-tool state is recovered via **`_tool_schema_states(events)`** (line 740), which replays `\"tool.schema.loaded\"` journal events (from `_record_loaded_tool_schemas`, `lantu/agent.py:1150`), deduplicating by tool name (line 743-757).\n\n---\n\n### Summary\n\n| Stage | File | Function |\n|-------|------|----------|\n| Snapshot | `lantu/tools/__init__.py:279` | `ToolRegistry.schema_epoch()` |\n| Change detect & record | `lantu/agent.py:1122` | `_sync_schema_epoch()` |\n| Journal persist | `lantu/memory/session.py:200` | `Session.record()` → `\"tool.schema.epoch.changed\"` |\n| Cached on Session | `lantu/memory/session.py:201` | `self.schema_epoch = dict(event.payload)` |\n| Attached to request | `lantu/tools/lens/request_trace.py:57-58` | `common[\"schema_epoch_id\"] = schema_epoch_id` |\n| Resume recovery | `lantu/memory/session.py:771` | `_schema_epoch_from_events()` |\n| Tool-load recovery | `lantu/memory/session.py:740` | `_tool_schema_states()` |",
+            "errors": []
+          },
+          {
+            "task": 7,
+            "prompt": "Trace how Session Journal events rebuild Conversation and FileLedger during resume, including the functions that replay events.",
+            "expected_paths": [
+              "lantu/memory/session.py",
+              "lantu/memory/file_ledger.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 25.539,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me read the message projection and registration functions.\n\nHere's the complete resume trace. The core replay function is **`SessionManager.resume()`** (`lantu/memory/session.py:397`).\n\n---\n\n### Step 1: Read Journal + Append Interruption Events\n\n**`resume()`** (line 397):\n- `journal = SessionJournal(...)` opens the session's `.jsonl` (line 402)\n- `events = journal.read()` reads the full NDJSON stream (line 404)\n- **`_append_interruption_events(journal, events, pending_runtime_id)`** (line 405) writes synthetic `runtime.interrupted` events for any runtimes/turns/tools that were still active when the session died (checks open `runtime.started`, `turn.started`, tool/model calls against their completed counterparts)\n- `events = journal.read()` re-reads so the appended interruption events are included (line 406)\n\n---\n\n### Step 2: Rebuild Conversation via `_project_messages()`\n\n**`_project_messages(events)`** (line 630) replays events in order into a `list[(message_id, Message)]`:\n\n| Event type | Handling |\n|------------|----------|\n| `message.created` | Reconstructs a `Message` via `_message_from_payload()` (line 638), stores in `messages` dict, appends to `projected` (line 634-640) |\n| `context.compacted` | **Resets** `projected` to: a synthetic summary `Message` (with marker `本次会话延续自之前的对话...`, line 645-655) + the kept tail messages looked up by `kept_message_ids` (line 657-660) |\n| `context.window.rolled_over` | **Resets** `projected` to a window-handoff summary `Message` (with artifact index, line 662-681) + kept messages (line 683-686) |\n| `context.tool_results_compacted` | In-place rewrites persisted-replacement content onto existing tool results by `tool_use_id` (line 688-701) |\n\n---\n\n### Step 3: Rebuild FileLedger via `_file_ledger_from_events()`\n\n**`_file_ledger_from_events(events)`** (line 761, read earlier):\n- Creates a fresh `FileLedger()`\n- Iterates all events, keeping only `file.observed` / `file.updated`\n- Calls **`ledger.apply_payload(event.payload)`** (line 767) → `FileLedger.apply_payload()` (`lantu/memory/file_ledger.py:147`) → `apply()`\n\nThis restores `_entries` (latest per-path state) and `_observations` (read observations keyed by tool_call_id), but `_visible_ranges` stays empty since it's volatile.\n\n---\n\n### Step 4: Rebuild Session State (other replay helpers)\n\nAlongside FileLedger, `resume()` calls three more replay functions (line 417-423):\n- **`_tool_schema_states(events)`** (line 740) — replays `tool.schema.loaded` events → `loaded_tool_states`\n- **`_schema_epoch_from_events(events)`** (line 771) — last `tool.schema.epoch.changed` payload → `schema_epoch`\n- **`_meta_from_events(events)`** (line 705) — replays `session.created` / `message.created` / `context.compacted` / `usage.recorded` to rebuild `SessionMeta` (title, message_count, summary, total_tokens)\n- **`_active_window_from_events(events)`** (line 780) — last `window_id` from `session.created` / `context.window.rolled_over`\n\n---\n\n### Step 5: Register & Return\n\n- **`session._register_projected_messages(projected)`** (line 425, defined line 345) — builds the `id(message) → message_id` reverse map so future message-persisting events can reference existing IDs\n- Returns a `ResumeResult(session, messages=[...], last_active=...)` (line 427-431)\n\nThe rebuilt `conversation.history` is then populated from `ResumeResult.messages` by the caller, and the FileLedger travels on `session.file_ledger` (wired into the Agent at `lantu/agent.py:344`).\n\n---\n\n### Summary\n\n| Concern | Replay function | File:line |\n|---------|-----------------|-----------|\n| Orchestration | `resume()` | `lantu/memory/session.py:397` |\n| Active-state fixup | `_append_interruption_events()` | `lantu/memory/session.py:794` |\n| Conversation rebuild | `_project_messages()` | `lantu/memory/session.py:630` |\n| Message lookup | `_message_from_payload()` | `lantu/memory/session.py` |\n| FileLedger rebuild | `_file_ledger_from_events()` → `apply_payload()` | `session.py:761` → `file_ledger.py:147` |\n| Tool states | `_tool_schema_states()` | `session.py:740` |\n| Schema epoch | `_schema_epoch_from_events()` | `session.py:771` |\n| Meta | `_meta_from_events()` | `session.py:705` |\n| Active window | `_active_window_from_events()` | `session.py:780` |\n| ID map | `_register_projected_messages()` | `session.py:345` |\n\n**Key design**: Journal is the durable source of truth; on resume every projection (Conversation, FileLedger, tool states, schema epoch, meta) is **derived by replaying events in sequence**, never cached as an independent state.",
+            "errors": []
+          },
+          {
+            "task": 8,
+            "prompt": "Trace the complete CodeSearch fallback chain when zvec semantic or exact MCP search fails, down to native rg and Python Grep.",
+            "expected_paths": [
+              "lantu/tools/code_search.py",
+              "lantu/tools/grep.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 17.392,
+            "tool_calls": [],
+            "answer": "I have the CodeSearch tool source from the earlier read (`lantu/tools/code_search.py`). Here's the complete fallback chain.\n\n---\n\n### Entry: `CodeSearch.execute()` — `lantu/tools/code_search.py:52`\n\nDispatches by mode:\n- `semantic` **or** (`auto` && `_looks_semantic(query)`) → `_semantic()` (line 60)\n- otherwise → `_exact()` (line 62)\n\n`_looks_semantic()` (line 64) treats queries ≥4 words or containing `?/?` as semantic.\n\n---\n\n### Branch 1: Semantic path — `_semantic()` (line 69)\n\n```python\nif self._mcp_manager is None:\n    return await self._fallback_exact(params)   # no MCP → straight to fallback\n...\nresult = await self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", arguments)\n```\n\n- If the MCP manager is not connected → **skip to `_fallback_exact()`** (line 70-73)\n- Otherwise call `zvec_grep_search`; on any exception OR an `isError` result → **`_fallback_exact()`** (line 91-94)\n\n---\n\n### Branch 2: Exact path — `_exact()` (line 115)\n\n```python\nif self._mcp_manager is not None:\n    result = await self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_rg\", arguments)\n    if not isError:\n        return success\n```\n- `_rg_command()` (line 139) builds a `rg -n [-g glob] <query> <path>` command string\n- On error/exception → record `mcp_error`, fall through to `_fallback_exact()` (line 135)\n\n---\n\n### Common fallback: `_fallback_exact()` (line 96)\n\n```python\nlocal = await self._local_rg(params)\nif local is not None:\n    return local                       # host rg succeeded\nself._grep.work_dir = self.work_dir\nreturn await self._grep.execute(GrepParams(...))   # built-in Python Grep\n```\n\n1. **`_local_rg()`** (line 146): `shutil.which(\"rg\")`; if not installed → returns `None` (line 148-150); else runs `rg -n --no-heading --color never ...` via `subprocess.run` in a thread (line 169). Returns a `ToolResult` on exit code 0/1, `None` on any other failure (line 174)\n2. If that returns `None`, falls to **built-in `self._grep.execute()`** — the `Grep` tool from **`lantu/tools/grep.py`** (imported line 13), called with `GrepParams(pattern, path, include)` (line 105-107)\n\n---\n\n### Complete fallback chain\n\n```\nCodeSearch.execute()  (lantu/tools/code_search.py:52)\n   │\n   ├─ semantic/auto   → _semantic()  (:69)\n   │     │ no manager → fallback_exact()\n   │     └─ mcp zvec_grep_search (:82)\n   │           │ error/isError → fallback_exact()\n   │           └─ SUCCESS\n   │\n   └─ exact/auto      → _exact()  (:115)\n         │ no manager → fallback_exact()\n         └─ mcp zvec_grep_rg (:123)\n               │ error/isError → fallback_exact()\n               └─ SUCCESS\n                     │\n                     └── _fallback_exact()  (:96)\n                           ├─ _local_rg()  (:146)   native rg binary\n                           │     └─ SUCCESS / None\n                           └─ self._grep.execute(GrepParams)   (:104-107)\n                                 └─ built-in Python Grep (lantu/tools/grep.py)\n```\n\n---\n\n### Key facts\n\n- **zvec MCP** = primary; requires a connected MCP manager (injected via `set_mcp_manager()` at line 49, from `lantu/runtime/lifecycle.py:230`)\n- **native `rg`** = first fallback, invoked as a subprocess via `_local_rg()` (line 146)\n- **Python `Grep`** = final fallback, the in-process tool from `lantu/tools/grep.py`\n- Degradation is tracked in `ToolResult.meta`: `\"backend\": \"zvec_grep_search\" | \"zvec_grep_rg\" | \"rg\" | \"python_grep\"` plus `degraded: True` and `semantic_fallback`/`semantic_error` flags (lines 87-112, 127-136)",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "variant": "baseline_rg_2",
+        "model": "deepseek-v4-flash",
+        "tasks_passed": 6,
+        "tasks_total": 8,
+        "elapsed_seconds": 282.571,
+        "tool_calls": {
+          "CodeSearch": 20,
+          "Glob": 1,
+          "ReadFile": 40
+        },
+        "total_tool_calls": 61,
+        "read_file_calls": 40,
+        "input_tokens": 159944,
+        "cache_read_tokens": 2176000,
+        "output_tokens": 18321,
+        "errors": [],
+        "tasks": [
+          {
+            "task": 1,
+            "prompt": "Trace the complete path from YAML provider configuration loading to the final OpenAI-compatible chat completion request. Name the key functions and files.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/client.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 37.678,
+            "tool_calls": [
+              "CodeSearch",
+              "Glob",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the path from YAML config loading to the OpenAI-compatible chat completion request.\n\nThe key files are `lantu/config.py` (YAML loading) and `lantu/client.py` (chat completions). Let me read them.\n\nLet me read the core request parts in client.py and the serialization/conversation layers.\n\nNow let me read the OpenAICompatClient stream method and the config _load_single_file part.\n\nLet me find where `create_client` is invoked and the provider selection from AppConfig.\n\nLet me verify the builder selection and how the run loop calls stream.\n\nNow I have the full picture. Here's the complete path:\n\n---\n\n## Full Trace: YAML → OpenAI Chat Completion\n\n### Phase 1 — YAML Loading (`lantu/config.py`)\n\n1. **`load_config()`** (line 278) — Entry point. Scans `~/.lantu/config.yaml`, `.lantu/config.yaml`, `.lantu/config.local.yaml` in priority order. Calls `_load_single_file()` for each.\n\n2. **`_load_single_file()`** (line 168) — `yaml.safe_load(path.read_text(...))` → validates via `validate_config_structure()` (from `lantu/validator.py`) → constructs `ProviderConfig` dataclasses (line 176-188) wrapping `name`, `protocol`, `base_url`, `model`, `api_key`, `thinking`, `reasoning_effort`, `context_window`, `max_output_tokens`.\n\n3. **`_merge_config()`** (line 240) — If multiple config files exist, merges them (override semantics). Returns `AppConfig` with a `providers: list[ProviderConfig]`.\n\n### Phase 2 — Provider Selection\n\n4. **Caller** (e.g. `lantu/__main__.py:315` → `load_config()`, then `lantu/__main__.py:392` for prompt mode, or `lantu/runtime/builder.py:87` for interactive mode) — Selects a `ProviderConfig` from `config.providers` and passes it to `create_client()`.\n\n### Phase 3 — Client Construction (`lantu/client.py`)\n\n5. **`create_client(config: ProviderConfig)`** (line 740) — Dispatches on `config.protocol`:\n   - `\"anthropic\"` → `AnthropicClient(config)` (line 224)\n   - `\"openai\"` → `OpenAIClient(config)` (Responses API)\n   - `\"openai-compat\"` → **`OpenAICompatClient(config)`** (line 552, Chat Completions)\n\n   Inside `OpenAICompatClient.__init__()` (line 561): `config.resolve_api_key()` resolves `${ENV_VAR}` or env fallback, then `AsyncOpenAI(api_key=..., base_url=config.base_url)`.\n\n### Phase 4 — Streaming Request (`OpenAICompatClient.stream()`)\n\n6. **`stream()`** (line 604) — Called by the agent run loop.\n   - `conversation.get_messages()` → `build_chat_completion_messages(messages)` (from `lantu/serialization.py:99`) converts internal `Message` objects into Chat Completions dicts (roles: user/assistant/tool, with `tool_calls` and `reasoning_content`).\n   - Prepends system message if present.\n   - Builds `kwargs` dict: `model`, `messages`, `max_tokens`, `extra_headers`, `stream=True`, `stream_options={\"include_usage\": True}`.\n   - If tools present: `self._convert_tools(tools)` (line 578) wraps schemas in `{\"type\": \"function\", \"function\": {...}}` format.\n   - If `reasoning_effort` set: injects `extra_body` with `enable_thinking` + `reasoning_effort`.\n   - Calls `_record_prepared_request(kwargs)` for Lens instrumentation.\n   - **`self._client.chat.completions.create(**kwargs)`** (line 642) — the actual OpenAI-compatible HTTPS request.\n   - Iterates chunks, yielding `TextDelta`, `ToolCallDelta`, `UsageEvent`, etc. back to the run loop.\n\n### Summary of Key Files & Functions\n\n| Step | File | Function/Class |\n|------|------|---------------|\n| YAML parse | `lantu/config.py:168` | `_load_single_file()` |\n| Validate | `lantu/validator.py` | `validate_config_structure()` |\n| Dataclass | `lantu/config.py:31` | `ProviderConfig` |\n| Merge config | `lantu/config.py:240` | `_merge_config()` |\n| Entry point | `lantu/config.py:278` | `load_config()` |\n| Select provider | `lantu/__main__.py` / `lantu/runtime/builder.py:87` | caller |\n| Client factory | `lantu/client.py:740` | `create_client()` |\n| Client impl | `lantu/client.py:552` | `OpenAICompatClient` |\n| API key resolve | `lantu/config.pyContinuing from where I stopped — finishing the summary table and the remaining steps.\n\n| Step | File | Function/Class |\n|------|------|---------------|\n| API key resolve | `lantu/config.py:48` | `ProviderConfig.resolve_api_key()` |\n| Messages convert | `lantu/serialization.py:99` | `build_chat_completion_messages()` |\n| Tool convert | `lantu/client.py:578` | `_convert_tools()` |\n| Chat request | `lantu/client.py:642` | `self._client.chat.completions.create(**kwargs)` |\n\n### Complete Chain (one line)\n\n`load_config()` (`config.py:278`) → `_load_single_file()` (`config.py:168`, `yaml.safe_load` + `validate_config_structure`) → `AppConfig.providers` → caller selects `ProviderConfig` → `create_client()` (`client.py:740`) dispatches by `protocol` → `OpenAICompatClient` (`client.py:552`, resolves API key + `AsyncOpenAI`) → `stream()` (`client.py:604`) → `build_chat_completion_messages()` (`serialization.py:99`) → `self._client.chat.completions.create(**kwargs)` (`client.py:642`).\n\nThat's the full path for the OpenAI-compatible Chat Completions request. The alternate `protocol` values `anthropic` and `openai` branch into `AnthropicClient` and `OpenAIClient` respectively at the same `create_client()` dispatch.",
+            "errors": []
+          },
+          {
+            "task": 2,
+            "prompt": "Trace how MCP server configuration becomes a connected manager and is injected into CodeSearch at runtime.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/runtime/lifecycle.py",
+              "lantu/tools/code_search.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 22.932,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "Let me trace the MCP config → manager → CodeSearch injection path.\n\nLet me read the CodeSearch injection points to complete the trace.\n\nNow I have the complete trace. Here it is:\n\n---\n\n## Full Trace: MCP Config → Connected Manager → CodeSearch Injection\n\n### Phase 1 — Config Parsing (`lantu/config.py`)\n\n1. **`_load_single_file()`** (line 168) — `yaml.safe_load` → `validate_config_structure()` → builds `MCPServerConfig` dataclasses (line 191-200) with `name`, `command`/`args` (stdio) or `url`/`headers` (HTTP).\n\n2. **`AppConfig`** (line 152) — stores `mcp_servers: list[MCPServerConfig]` (line 157).\n\n### Phase 2 — Runtime Startup (`lantu/runtime/builder.py`)\n\n3. **`_start_runtime_services()`** (line 355) — If `runtime.config.mcp_servers` is non-empty, spawns a background task: `asyncio.create_task(initialize_runtime_mcp(runtime))`.\n\n### Phase 3 — Connect & Register (`lantu/runtime/lifecycle.py`)\n\n4. **`initialize_runtime_mcp()`** (line 219) — The core wiring function:\n   - Creates `MCPManager()` (line 220).\n   - **`manager.load_configs(runtime.config.mcp_servers)`** (line 223) — stores `MCPServerConfig` dict by name.\n   - **`manager.register_all_tools(runtime.registry)`** (line 224) → calls `connect_all()` → for each config, creates `MCPClient(config)` (from `lantu/mcp/client.py`), calls `client.connect()`, then `client.list_tools()`, wraps each in `MCPToolWrapper`, registers into `ToolRegistry`.\n   - **`runtime.mcp_manager = manager`** (line 227) — stores the manager on the runtime.\n   - **`code_search.set_mcp_manager(manager)`** (line 229-230) — retrieves the `CodeSearch` tool from the registry and injects the manager.\n   - **Disables `mcp_zvec_grep_*` tools** (line 233-235) so they're hidden from the model but available to `CodeSearch` internally.\n   - Builds `runtime.mcp_instructions` from `InitializeResult.instructions` (line 237).\n\n### Phase 4 — CodeSearch Uses MCP (`lantu/tools/code_search.py`)\n\n5. **`CodeSearch.set_mcp_manager()`** (line 49) — stores `self._mcp_manager`.\n\n6. **`CodeSearch._semantic()`** (line 69) — If `self._mcp_manager` is set, calls `self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", arguments)` (line 82-83). Falls back to `_fallback_exact()` if MCP is absent or errors.\n\n7. **`CodeSearch._exact()`** (line 115) — If `self._mcp_manager` is set, delegates to `zvec_grep_rg` (line 123-124). Falls back to local `rg` → Python `Grep` for non-MCP repos.\n\n### Key Files & Functions\n\n| Step | File | Function/Class |\n|------|------|---------------|\n| Config parse | `lantu/config.py:191` | `_load_single_file()` → `MCPServerConfig` |\n| Store config | `lantu/config.py:157` | `AppConfig.mcp_servers` |\n| Spawn MCP task | `lantu/runtime/builder.py:355` | `_start_runtime_services()` |\n| Wire manager | `lantu/runtime/lifecycle.py:219` | `initialize_runtime_mcp()` |\n| Load configs | `lantu/mcp/manager.py:39` | `MCPManager.load_configs()` |\n| Connect all | `lantu/mcp/manager.py:44` | `MCPManager.connect_all()` |\n| Connect client | `lantu/mcp/client.py:52` | `MCPClient.connect()` |\n| Register tools | `lantu/mcp/manager.py:87` | `MCPManager.register_all_tools()` |\n| Inject manager | `lantu/runtime/lifecycle.py:229` | `code_search.set_mcp_manager(manager)` |\n| Use MCP | `lantu/tools/code_search.py:49,82,123` | `CodeSearch.set_mcp_manager()` / `call_tool()` |",
+            "errors": []
+          },
+          {
+            "task": 3,
+            "prompt": "Explain how FileLedger state changes after ReadFile, after EditFile, and after a Session resume. Cite the implementation files.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/file_ledger.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 33.454,
+            "tool_calls": [
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me examine the FileLedger implementation.\n\nLet me find where the tools call FileLedger APIs and how session resume reconstructs it.\n\nLet me read the agent.py sections that wire FileLedger during ReadFile results and EditFile callsHere's the complete picture:\n\n---\n\n## FileLedger State Changes\n\n### Shared: `_record_file_ledger_event()` (`lantu/agent.py:1341-1394`)\n\nAll three tools flow through this single function after a successful call. It re-reads the file from disk, computes a `sha256` hash, calls `FileLedger.build_entry()`, records a journal event, and calls `ledger.apply()`.\n\n### After ReadFile (`lantu/agent.py:1347` tool name match)\n\n1. **`ledger.apply(entry)`** (`file_ledger.py:136`) — Stores the entry in `_entries[path]`, replacing any previous entry for the same path.\n2. **Creates `FileReadObservation`** (`file_ledger.py:138-145`) — Since `operation == \"read\"` and `tool_call_id` is set, stores the observed content hash + requested line range keyed by `tool_call_id`.\n3. **`mark_visible()`** (`agent.py:1319-1338`) — During result preparation, records the actual visible line ranges in `_visible_ranges` (the ranges rendered into context).\n4. Journal event: `\"file.observed\"`.\n\n### After EditFile (`lantu/agent.py:1347` tool name match)\n\n1. **`ledger.invalidate(path)`** (`agent.py:1381`) — Clears all `_visible_ranges` entries for this path (`file_ledger.py:201-205`). The old content hash is no longer visible because the file has changed.\n2. **`ledger.apply(entry)`** — Stores new entry with `operation=\"edit\"`, `offset=0`, `limit=None`. No `FileReadObservation` is created (operation is not \"read\").\n3. **`WriteFile` cache invalidation** (`lantu/tools/write_file.py:51`) — The cached file content is also invalidated (`self._cache.invalidate()`).\n4. Journal event: `\"file.updated\"`.\n\n### After Session Resume (`lantu/memory/session.py:761-768`)\n\n```python\ndef _file_ledger_from_events(events: list[JournalEvent]) -> FileLedger:\n    ledger = FileLedger()\n    for event in events:\n        if event.type not in {\"file.observed\", \"file.updated\"}:\n            continue\n        ledger.apply_payload(event.payload)\n    return ledger\n```\n\n1. **Replays journal** — Iterates all events; only `\"file.observed\"` and `\"file.updated\"` are relevant.\n2. **`apply_payload()`** (`file_ledger.py:147`) — Calls `FileLedgerEntry.from_payload()` then `ledger.apply()`, restoring `_entries` (and `_observations` for reads).\n3. **Latest-wins** — Since `apply()` overwrites `_entries[path]`, later events for the same path replace earlier ones — only the most recent entry per path survives.\n4. **_visible_ranges are NOT persisted** — They're volatile. Cleared on resume, rebuilt incrementally as the conversation progresses and results are rendered into context.\n\n### Summary Table\n\n| Event | `_entries[path]` | `_observations` | `_visible_ranges` | Journal event |\n|-------|------------------|----------------|-------------------|---------------|\n| ReadFile | Set (read, with offset/limit) | Created | Recorded | `file.observed` |\n| EditFile | Set (edit, no offset/limit) | Unchanged | Cleared for path | `file.updated` |\n| Session resume | Replayed from journal | Restored | Empty (volatile) | Already persisted |",
+            "errors": []
+          },
+          {
+            "task": 4,
+            "prompt": "Trace the decision path from context pressure measurement through stale tool cleanup and structured compaction to window rollover.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 49.824,
+            "tool_calls": [
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me examine the context manager and related modules.\n\nLet me find the key functions in this file: pressure measurement, stale tool cleanup, and the auto_compact decision.\n\nLet me read the window rollover execution path and the helper functions `_compute_keep_start_index`.\n\nI have all the pieces. Here's the complete decision path:\n\n---\n\n## Decision Path: Pressure → Cleanup → Compaction → Rollover\n\nAll logic lives in `lantu/context/manager.py`.\n\n### Phase 1 — Pressure Measurement\n\n**`auto_compact()`** (line 1132) starts by calling `conversation.current_tokens()` (line 1152) which uses a dual-layer estimator (real API usage anchor + tail char estimate), then passes it to:\n\n**`analyze_context_pressure()`** (line 1000) — Pure diagnostic function:\n- Splits history at `_compute_keep_start_index()` (line 909): walks backwards accumulating tokens up to `KEEP_RECENT_TOKENS` (10K) or `MIN_KEEP_MESSAGES` (5), capped at `KEEP_MAX_TOKENS` (40K). Aligns on tool_use↔tool_result pairs (line 958).\n- Computes `old_tokens`, `stale_tool_tokens`, `existing_summary_tokens`, `recent_tokens`.\n- Classifies pressure level (lines 1030-1035):\n  - `current < soft_threshold` (effectiveWindow − 13K) → **`none`**\n  - `current < hard_threshold` (effectiveWindow − 3K) → **`soft`**\n  - else → **`hard`**\n- Recommends action (lines 1046-1055):\n  - `none` → `none`\n  - `hard` + existing summary → `window_rollover_candidate`\n  - `stale_tool_tokens * 2 >= old_tokens` → `compact_stale_tools`\n  - else → `structured_summary`\n\nReturns a `ContextPressureReport` (line 94) with `pressure_level`, `recommended_action`, `keep_start`, `dominant_source`, etc.\n\n### Phase 2 — Threshold Gating (`auto_compact()`, line 1162-1178)\n\n```python\nsoft_threshold = compute_compact_threshold(context_window, manual=False)  # effectiveWindow − 13K\nhard_threshold = compute_compact_threshold(context_window, manual=True)   # effectiveWindow − 3K\n```\n\n- `current < soft_threshold` → return `None` (no compaction needed)\n- `current >= hard_threshold` → force compact (bypass circuit breaker)\n- Between thresholds → check `CompactCircuitBreaker.is_open()` (3 consecutive failures = open)\n\n### Phase 3 — Policy Decision\n\n**`CompactionPolicy.decide()`** (line 129) — Pure classifier:\n\n| Condition | Action |\n|-----------|--------|\n| `pressure_level == \"none\"` | `NONE` |\n| `at_user_boundary == False` | `DEFER` |\n| `hard` + `existing_summary_tokens > 0` | `WINDOW_ROLLOVER` |\n| `recommended_action == \"compact_stale_tools\"` | `COMPACT_STALE_TOOLS` |\n| `soft` + `cache_healthy` | `DEFER` (rely on prompt caching) |\n| fallthrough | `STRUCTURED_SUMMARY` |\n\n### Phase 4 — Action Execution\n\n**Case A: `COMPACT_STALE_TOOLS`** (line 1191)\n\n`compact_stale_tool_results()` (line 162) — Only touches messages before `keep_start`. Replaces oversized tool result bodies with a persisted-file reference (`<persisted-output>`) or a head/tail preview. Leaves recent messages untouched. Calls `conversation.replace_history_preserving_runtime()`.\n\n**Case B: `STRUCTURED_SUMMARY`** (line 1305, else branch)\n\n1. `_compute_keep_start_index()` (line 1232) — determines prefix/recent boundary.\n2. Sends `to_summarize` + `COMPACTION_INSTRUCTION` (line 586) to the LLM, collects a summary.\n3. `extract_summary()` (line 1301) — strips XML tags from LLM output.\n4. `build_compact_messages()` (line 1316) — wraps summary in handoff user message + `recovery_attachment`.\n5. `conversation.replace_history(new_messages + keep_tail)` (line 1330) — resets token anchor.\n6. Returns `CompactEvent` with `boundary` (summary + keep tail) for session journaling.\n\n**Case C: `WINDOW_ROLLOVER`** (line 1305, main branch)\n\n1. Same LLM summary generation as structured (shared code path, lines 1241-1301).\n2. `_compute_rollover_keep_tail()` (line 969) — keeps only the last complete user-assistant turn, capped at `ROLLOVER_KEEP_MAX_TOKENS` (4K).\n3. `build_window_rollover_messages()` (line 676) — builds handoff message mentioning old-window archive and artifact indices.\n4. `conversation.replace_history(new_messages + rollover_tail)`.\n5. Returns `CompactEvent` with `action=\"window_rollover\"`.\n\n### Phase 5 — Session Persistence\n\nThe caller (session layer) receives the `CompactEvent`, extracts `CompactBoundary` (summary + keep_tail + artifact_refs), and writes a `compact_boundary` record into the session journal — so session resume can reconstruct the same compressed view.\n\n### Summary: Key Functions\n\n| Step | Function | Line |\n|------|----------|------|\n| Measure | `analyze_context_pressure()` | 1000 |\n| Threshold | `compute_compact_threshold()` / `should_auto_compact()` | 576 / 582 |\n| Orchestrate | `auto_compact()` | 1132 |\n| Decide | `CompactionPolicy.decide()` | 129 |\n| Stale cleanup | `compact_stale_tool_results()` | 162 |\n| Summarize | `extract_summary()` + LLM call | 649 / 1253 |\n| Build compact | `build_compact_messages()` | 657 |\n| Build rollover | `build_window_rollover_messages()` | 675 |\n| Keep start | `_compute_keep_start_index()` | 909 |\n| Rollover tail | `_compute_rollover_keep_tail()` | 969 |",
+            "errors": []
+          },
+          {
+            "task": 5,
+            "prompt": "Explain how an oversized tool result is persisted, previewed in Conversation, and later made recoverable. Cite the relevant functions.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 29.212,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me read the persistence and preview functions in the context manager.\n\nNow let me read the stale compact path where references replace full previews.\n\n\n\nHere's the complete trace of an oversized tool result from detection to recovery.\n\n---\n\n## Oversized Tool Result: Persist → Preview → Recover\n\n### Phase 1 — Detection & Persistence\n\nEntry point: **`prepare_tool_results_with_metadata()`** (`lantu/context/manager.py:443`), called after every tool call turn. Two thresholds:\n\n**Individual overflow** (line 468-480): If `len(content) > TOOL_RESULT_INLINE_CHAR_LIMIT` (8,192 chars) and it's not a file read:\n\n```python\npath = persist_tool_result(result.tool_use_id, content, session_dir)\ncontent = make_persisted_preview(content, path)\n```\n\n**`persist_tool_result()`** (line 288) — Writes the full content to `.lantu/session/tool-results/{tool_use_id}.txt` using `O_EXCL` (first-writer wins, duplicates silently skip).\n\n**Aggregate overflow** (line 507-559): After individual processing, if sum of all non-file-read result sizes exceeds `AGGREGATE_CHAR_LIMIT` (64,000 chars), the largest results are progressively replaced — first with a head/tail preview, then with a bare reference.\n\n### Phase 2 — Preview Construction\n\n**`make_persisted_preview()`** (line 299) — Builds the replacement text:\n\n```\n<persisted-output>\n输出太大（{sizeKB}KB），完整内容已保存到：\n.lantu/session/tool-results/{tool_use_id}.txt\n\n预览（前 4KB + 后 1KB）：\n{content[:4096]}\n... [middle content omitted] ...\n{content[-1024:]}\n</persisted-output>\n```\n\nFor file reads, **`make_file_read_preview()`** (line 385) instead keeps complete numbered lines at both ends and reports visible line ranges.\n\n### Phase 3 — Stale Compaction (Later Turns)\n\n**`compact_stale_tool_results()`** (line 162) — During auto-compaction, old tool results before `keep_start` are further reduced:\n\n- If a result already contains a `<persisted-output>` tag, it extracts the artifact path from `\"完整内容已保存到：\\n([^\\n]+)\"` and replaces the entire content with just **`make_persisted_reference()`** (line 330):\n\n  ```\n  <persisted-output>\n  完整内容已保存到：\n  .lantu/session/tool-results/{tool_use_id}.txt\n  </persisted-output>\n  ```\n\n- If a result is oversized but *not yet persisted* (still inline), it first calls `persist_tool_result()` to write it, then replaces with the bare reference.\n\nSmall inline results and all recent messages (after `keep_start`) are left untouched.\n\n### Phase 4 — Recoverability\n\nTwo independent recovery paths:\n\n**A — ReadFile via embedded path**: The artifact path is embedded in the preview text as a plain file path. A `ReadFile` call (e.g. `ReadFile(\".lantu/session/tool-results/{id}.txt\")`) retrieves the full content.\n\n**B — Session Journal resume**: Each tool result event is recorded in the session journal (`\"file.observed\"` / `\"file.updated\"`). On session resume, `_file_ledger_from_events()` (`lantu/memory/session.py:761`) replays these events and restores the FileLedger state. The journal itself also owns artifact cleanup — files survive as long as their path appears in the journal's `compact_boundary` or active messages.\n\n**C — Compaction retains artifact refs**: `_persisted_artifact_refs()` (line 707) scans the messages being summarized and collects stable artifact paths into the `CompactBoundary`. These refs are embedded back into the handoff message via `build_compact_messages()` / `build_window_rollover_messages()`, making them reachable again post-compaction.\n\n### Key Functions Summary\n\n| Stage | Function | File:Line |\n|-------|----------|-----------|\n| Persist | `persist_tool_result()` | `lantu/context/manager.py:288` |\n| Preview | `make_persisted_preview()` | `lantu/context/manager.py:299` |\n| File-read preview | `make_file_read_preview()` | `lantu/context/manager.py:385` |\n| Bare reference | `make_persisted_reference()` | `lantu/context/manager.py:330` |\n| Orchestrate all | `prepare_tool_results_with_metadata()` | `lantu/context/manager.py:443` |\n| Stale reduction | `compact_stale_tool_results()` | `lantu/context/manager.py:162` |\n| Collect refs | `_persisted_artifact_refs()` | `lantu/context/manager.py:707` |\n| Journal replay | `_file_ledger_from_events()` | `lantu/memory/session.py:761` |\n\n### Data Flow Diagram\n\n```\nRaw result (any size)\n    ↓\nprepare_tool_results_with_metadata()\n    ├── > 8KB? → persist_tool_result() + make_persisted_preview() → preview with file path\n    ├── total > 64KB? → shrink biggest results (preview → reference)\n    └── file read? → make_file_read_preview() → numbered-line preview + visible ranges\n    ↓\nConversation (preview text with artifact path embedded)\n    ↓ (later turns, auto-compact)\ncompact_stale_tool_results() → reduce old previews to bare references\n    ↓\nRecovery: ReadFile(path) OR journal replay\n```",
+            "errors": []
+          },
+          {
+            "task": 6,
+            "prompt": "Trace how a tool schema view is recorded as a Schema Epoch and how that state is persisted for later requests or resume.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 39.205,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I have the complete picture. Here's the trace:\n\n---\n\n## Schema Epoch: Recording → Persistence → Resume\n\n### Phase 1 — Fingerprinting (`lantu/tools/__init__.py`)\n\n**`ToolRegistry.schema_epoch(protocol)`** (line 279) — Computes a stable identity for the current model-visible tool-schema view:\n\n1. `self.get_all_schemas(protocol)` — gets the provider-adapted schemas (snapshot-cached in `_schema_snapshots`).\n2. Builds `schema_states` = list of `{name, schema_hash}` via `_schema_hash()` (a sha256 JSON hash).\n3. Assembles a `canonical` dict: `protocol`, `loading_mode`, `schemas`, `deferred_tools`.\n4. `fingerprint = _schema_hash(canonical)`.\n5. Returns a frozen **`SchemaEpoch`** dataclass (line 16) with `epoch_id=f\"schema-{fingerprint[:16]}\"`, plus `visible_tools` and `deferred_tools` tuples.\n\n### Phase 2 — Recording on Change (`lantu/agent.py:1122`)\n\n**`_sync_schema_epoch()`** (line 1122) — Called before every model request (line 661):\n\n```python\nepoch = self.registry.schema_epoch(self.protocol)\nif epoch.epoch_id == self._schema_epoch_id:\n    return  # unchanged, skip\n```\n\nIf the epoch changed, it:\n- Loads the previous epoch from `self.session.schema_epoch` to compute a `previous_epoch_id` and `reason` (`initial`, `mode_changed`, `tool_loaded`, `schema_changed`).\n- Calls **`self.session.record(ExecutionEvent(\"tool.schema.epoch.changed\", payload))`** (line 1145) — appends to the journal and updates `self._schema_epoch_id`.\n\n### Phase 3 — In-Memory + Journal Persistence (`lantu/memory/session.py`)\n\n**`Session.record()`** (line 191) — Writes the event to the append-only NDJSON journal (via `journal.append`), then, for `tool.schema.epoch.changed`, updates `self.schema_epoch = dict(event.payload)` (line 200-201). So the session always holds the **latest** epoch in memory.\n\nThe epoch payload includes: `epoch_id`, `fingerprint`, `protocol`, `loading_mode`, `visible_tools`, `deferred_tools`, `previous_epoch_id`, `reason` (see `SchemaEpoch.to_payload()` at `tools/__init__.py:26` + `agent.py:1130-1140`).\n\n### Phase 4 — Attached to Requests (`lantu/agent.py:661-668`)\n\nAfter syncing, the agent passes `schema_epoch_id=self._schema_epoch_id` into `request_recorder.stream(...)`. This flows to Lens instrumentation (`lantu/tools/lens/request_trace.py:57`), which records the epoch alongside each model call for cache/usage analysis.\n\n### Phase 5 — Resume Restore (`lantu/memory/session.py`)\n\n**`SessionManager.resume()`** (line 397):\n- Reads the journal, then reconstructs the `Session` with `schema_epoch=_schema_epoch_from_events(events)` (line 419).\n\n**`_schema_epoch_from_events()`** (line 771) — Replays the journal, keeping the **latest** `tool.schema.epoch.changed` payload:\n\n```python\nfor event in events:\n    if event.type == \"tool.schema.epoch.changed\":\n        latest = dict(event.payload)\n```\n\nThis restored `session.schema_epoch` is picked back up by `Agent.__init__` (line 345-346), seeding `self._schema_epoch_id` — so on resume the agent doesn't re-sync if the schema is unchanged, preserving provider cache stability.\n\n### Key Functions Summary\n\n| Stage | Function | File:Line |\n|-------|----------|-----------|\n| Compute epoch | `ToolRegistry.schema_epoch()` | `lantu/tools/__init__.py:279` |\n| Fingerprint | `_schema_hash()` | `lantu/tools/__init__.py` |\n| Detect change | `Agent._sync_schema_epoch()` | `lantu/agent.py:1122` |\n| Attach to request | `request_recorder.stream(..., schema_epoch_id=...)` | `lantu/agent.py:668` |\n| Persist + update | `Session.record()` | `lantu/memory/session.py:191` |\n| Restore on resume | `_schema_epoch_from_events()` | `lantu/memory/session.py:771` |\n\n### Data Flow\n\n```\nToolRegistry.schema_epoch(protocol) → SchemaEpoch (fingerprint hash)\n    ↓ change detected\nAgent._sync_schema_epoch() → Session.record(\"tool.schema.epoch.changed\", payload)\n    ↓ append-only NDJSON journal + in-memory session.schema_epoch (latest)\n    ↓\nrequest_recorder.stream(..., schema_epoch_id=...)  →  attached to model call\n    ↓ (future session)\nresume() → _schema_epoch_from_events() → Agent init seeds _schema_epoch_id\n```",
+            "errors": []
+          },
+          {
+            "task": 7,
+            "prompt": "Trace how Session Journal events rebuild Conversation and FileLedger during resume, including the functions that replay events.",
+            "expected_paths": [
+              "lantu/memory/session.py",
+              "lantu/memory/file_ledger.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 47.519,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "Let me read the full `_project_messages` function which rebuilds the conversation.\n\nNow let me check how projected messages feed into the ConversationManager after resume.\n\nI have the complete trace. Here's how Session Journal events rebuild Conversation and FileLedger during resume:\n\n---\n\n## Session Resume: Journal → Conversation + FileLedger\n\n### Phase 1 — Entry Point (`lantu/memory/session.py:397`)\n\n**`SessionManager.resume(session_id)`**:\n1. Opens the session's append-only NDJSON journal: `SessionJournal(self._sessions_dir, session_id)`.\n2. `journal.read()` (line 404) → loads all events.\n3. `_append_interruption_events(...)` (line 405) → synthesizes `runtime.stopped`/`turn.stopped`/`model.stopped` events for whatever was still in-flight at crash time.\n4. Re-reads events (line 406) so the interruption events are included.\n5. `_project_messages(events)` (line 407) → rebuilds the **Conversation** message list.\n6. `_file_ledger_from_events(events)` (line 418) → rebuilds the **FileLedger**.\n7. Also rebuilds `_tool_schema_states` (loaded deferred tools), `_schema_epoch_from_events` (latest schema epoch), `_active_window_from_events`.\n8. Constructs the `Session` and calls `_register_projected_messages(projected)` (line 425), which remaps `id(message) → message_id` so future journal events (compaction kept-message-ids, tool-result compaction) can find them.\n9. Returns `ResumeResult(session, messages, last_active)`.\n\n### Phase 2 — Rebuilding Conversation (`_project_messages()`, `session.py:630`)\n\nIterates events **in journal order** and builds `list[tuple[message_id, Message]]`:\n\n- **`message.created`** (line 634): `_message_from_payload()` (line 577) converts the stored payload back into a `Message` — reconstructing `tool_uses` (`ToolUseBlock`), `tool_results` (`ToolResultBlock`), `thinking_blocks`, `kind`, and appendix keys.\n- **`context.compacted`** (line 641): **Replaces** the entire projection with a synthetic summary user-message + the `kept_message_ids` (referenced from the `messages` dict built so far). This reproduces the exact post-compaction view.\n- **`context.window.rolled_over`** (line 662): **Replaces** the projection with the handoff-summary user-message (including artifact index) + kept tail — reproducing the new-window state.\n- **`context.tool_results_compacted`** (line 688): Mutates in-place, replacing `tool_result.content` with the persisted reference for matching `tool_use_id`s.\n\nThe final `projected` list becomes `result.messages`.\n\n### Phase 3 — Rebuilding FileLedger (`_file_ledger_from_events()`, `session.py:761`)\n\n```python\nledger = FileLedger()\nfor event in events:\n    if event.type not in {\"file.observed\", \"file.updated\"}:\n        continue\n    ledger.apply_payload(event.payload)\n```\n\n- Filters to `file.observed` (ReadFile) and `file.updated` (EditFile/WriteFile).\n- `apply_payload()` (`file_ledger.py:147`) → `FileLedgerEntry.from_payload()` → `ledger.apply()`, which stores one **latest entry per path** in `_entries` and re-registers `FileReadObservation`s for read events.\n- `_visible_ranges` is **not** persisted — it stays empty and is rebuilt as the conversation renders new results.\n\n### Phase 4 — Consuming into ConversationManager\n\nDownstream handlers take `ResumeResult.messages` and rebuild a live conversation, e.g. **`lantu/commands/handlers/session.py:84`**:\n\n```python\nconv = ConversationManager(history=list(result.messages))\n```\n\nThe agent then resumes with this conversation + `result.session` (which carries the restored `file_ledger`, `schema_epoch`, and `loaded_tool_states`).\n\n### Key Functions Summary\n\n| Stage | Function | File:Line |\n|-------|----------|-----------|\n| Resume entry | `SessionManager.resume()` | `lantu/memory/session.py:397` |\n| Conversation replay | `_project_messages()` | `lantu/memory/session.py:630` |\n| Payload→Message | `_message_from_payload()` | `lantu/memory/session.py:577` |\n| FileLedger replay | `_file_ledger_from_events()` | `lantu/memory/session.py:761` |\n| Schema epoch replay | `_schema_epoch_from_events()` | `lantu/memory/session.py:771` |\n| Tool schema replay | `_tool_schema_states()` | `lantu/memory/session.py:740` |\n| Register msg IDs | `_register_projected_messages()` | `lantu/memory/session.py:345` |\n| Build conversation | `ConversationManager(history=...)` | `lantu/commands/handlers/session.py:84` |\n\n### Data Flow\n\n```\njournal.jsonl (append-only events)\n   ↓\nSessionManager.resume()\n   ├── _project_messages()  ─→ Conversation messages\n   ├── _file_ledger_from_events() ─→ FileLedger\n   ├── _schema_epoch_from_events() ─→ schema_epoch\n   └── _tool_schema_states() ─→ loaded_tool_states\n   ↓\nResumeResult(messages, session)\n   ↓\nConversationManager(history=result.messages)\n```",
+            "errors": []
+          },
+          {
+            "task": 8,
+            "prompt": "Trace the complete CodeSearch fallback chain when zvec semantic or exact MCP search fails, down to native rg and Python Grep.",
+            "expected_paths": [
+              "lantu/tools/code_search.py",
+              "lantu/tools/grep.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 22.747,
+            "tool_calls": [
+              "ReadFile"
+            ],
+            "answer": "I already have the full file from earlier. Let me read it again to trace the exact fallback chain.\n\nHere's the complete CodeSearch fallback chain.\n\n---\n\n## CodeSearch Fallback Chain (`lantu/tools/code_search.py`)\n\n### Dispatch — `execute()` (line 52)\n\nRoutes to `_semantic()` (line 69) or `_exact()` (line 115). `auto` mode picks semantic if `_looks_semantic()` (line 65) returns true (≥4 words or contains `?`/`？`).\n\n### Semantic path (`_semantic()`, line 69) — primary = `zvec_grep_search`\n\n1. **MCP absent** (line 70): `_mcp_manager is None` → immediately jump to `_fallback_exact()` with `semantic_fallback=True`.\n2. **MCP present** (line 82): `call_tool(\"zvec_grep\", \"zvec_grep_search\", arguments)`.\n   - Success (no `isError`) → return result with `meta.backend=\"zvec_grep_search\"`.\n   - **`isError`** (line 85) → `raise RuntimeError` → caught at line 91.\n   - **Any exception** (line 91) → caught.\n3. On failure → `_fallback_exact()` with `meta.semantic_error=str(exc)` set (line 93).\n\n### Exact path (`_exact()`, line 115) — primary = `zvec_grep_rg`\n\n1. **MCP present** (line 117): `call_tool(\"zvec_grep\", \"zvec_grep_rg\", {root, command})` where `command` is built by `_rg_command()` (line 139) — a JSON-quoted native `rg -n` CLI invocation run inside the MCP server.\n   - Success → `meta.backend=\"zvec_grep_rg\"`.\n   - `isError` → record `mcp_error`, fall through.\n   - Exception → record `mcp_error`, fall through.\n2. On failure → `_fallback_exact()`, popping `semantic_fallback` (line 136).\n\n### Shared fallback (`_fallback_exact()`, line 96)\n\n1. **Native rg** — `_local_rg()` (line 146):\n   - `shutil.which(\"rg\")` (line 147) → if rg not installed, return `None`.\n   - Runs `rg -n --no-heading --color never [-g glob] query path` via `subprocess` in a thread (line 169).\n   - `returncode == 0` → `meta.backend=\"rg\"` success result.\n   - `returncode == 1` → `\"No matches found.\"` result (still `backend=\"rg\"`).\n   - Any other code → return `None` (line 174) → proceed to next fallback.\n2. **Python Grep** (line 104): `self._grep.execute(GrepParams(pattern, path, include))` from `lantu/tools/grep.py`, sets `meta.backend=\"python_grep\"`. This is the terminal fallback — always returns a result.\n\n### Fallback Chain Summary\n\n```\nsemantic ──► zvec_grep_search (MCP)\n                │ fail (isError/exception/no manager)\n                ▼\nexact    ──► zvec_grep_rg (MCP) ──► fail ──► ┐\n                                          │\n        ┌──────────────────────────────────┘\n        ▼\n   _fallback_exact()\n        ├─► native rg binary (subprocess) ── success / \"No matches\" → done\n        │          │ rg missing OR nonzero(≠1) → None\n        ▼\n        Python Grep (lantu/tools/grep.py) ── terminal fallback\n```\n\n### Degradation Markers (in `meta`)\n\n| Stage | `backend` | `degraded` | `semantic_fallback` |\n|-------|-----------|-----------|---------------------|\n| `zvec_grep_search` success | `zvec_grep_search` | `False` | — |\n| `zvec_grep_rg` success | `zvec_grep_rg` | `False` | — |\n| native rg | `rg` | `True` | set (semantic) / popped (exact) |\n| Python Grep | `python_grep` | `True` | set (semantic) / popped (exact) |\n\nSemantic failures additionally record `semantic_error` (line 93); native rg always sets `degraded=True`. This chain guarantees CodeSearch never throws on zvec/MCP outage — it always degrades to a working backend.",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "variant": "baseline_rg_3",
+        "model": "deepseek-v4-flash",
+        "tasks_passed": 7,
+        "tasks_total": 8,
+        "elapsed_seconds": 245.652,
+        "tool_calls": {
+          "CodeSearch": 37,
+          "ReadFile": 51
+        },
+        "total_tool_calls": 88,
+        "read_file_calls": 51,
+        "input_tokens": 127907,
+        "cache_read_tokens": 1768960,
+        "output_tokens": 18687,
+        "errors": [],
+        "tasks": [
+          {
+            "task": 1,
+            "prompt": "Trace the complete path from YAML provider configuration loading to the final OpenAI-compatible chat completion request. Name the key functions and files.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/client.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 36.234,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "Let me read the client creation and the OpenAI-compat chat completion path.\n\nI have the complete path traced.\n\n## YAML config → OpenAI-compatible chat completion request\n\n**1. Config loading — `lantu/config.py`**\n- `load_config(path=None)` (`lantu/config.py:278`) merges `~/.lantu/config.yaml` → `.lantu/config.yaml` → `.lantu/config.local.yaml`.\n- `_load_single_file(path)` (`lantu/config.py:168`) calls `yaml.safe_load` (`:170`), validates via `validate_config_structure`, and builds `ProviderConfig` dataclasses (`lantu/config.py:31`) with `protocol`, `base_url`, `model`, `api_key`.\n\n**2. Entry point — `lantu/__main__.py`**\n- `_main()` (`lantu/__main__.py:283`) calls `load_config()` at `:315`.\n\n**3. Provider selection — `lantu/ui/inline/session.py`**\n- `select_provider(providers, chooser)` (`:170`) picks one `ProviderConfig` (single provider short-circuits at `:175`).\n\n**4. Client construction — `lantu/client.py`**\n- `create_client(config)` (`:740`) dispatches on `config.protocol`; `\"openai-compat\"` → `OpenAICompatClient` (`:552`).\n- `OpenAICompatClient.__init__` (`:561`) resolves the key via `config.resolve_api_key()` (`lantu/config.py:48`) and builds `AsyncOpenAI(api_key=..., base_url=...)`.\n- Used from `lantu/runtime/builder.py:87` in `_build_core` for interactive mode.\n\n**5. Chat completion request — `lantu/client.py`**\n- `OpenAICompatClient.stream()` (`:604`) builds messages with `build_chat_completion_messages` (`lantu/serialization.py`), assembles `kwargs`, then calls `self._client.chat.completions.create(**kwargs)` (`:642`).\n\n**Chain:** `config.yaml` → `load_config`/`_load_single_file` (`config.py`) → `select_provider` (`session.py`) → `create_client` (`client.py:740`) → `OpenAICompatClient.stream` → `AsyncOpenAI.chat.completions.create` (`client.py:642`).",
+            "errors": []
+          },
+          {
+            "task": 2,
+            "prompt": "Trace how MCP server configuration becomes a connected manager and is injected into CodeSearch at runtime.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/runtime/lifecycle.py",
+              "lantu/tools/code_search.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 18.034,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me confirm the CodeSearch injection method and the remote.py injection.\n\nI have the complete path traced. There are two injection points (interactive runtime and remote server).\n\n## MCP config → connected manager → CodeSearch injection\n\n**1. Config parsing — `lantu/config.py`**\n- `_load_single_file` (`:168`) → `validate_mcp_servers` (`lantu/validator.py:126`) → `MCPServerConfig` dataclass (`lantu/config.py:109`), stored in `AppConfig.mcp_servers` (`:157`).\n\n**2. Manager construction — `lantu/mcp/manager.py`**\n- `MCPManager()` (`:31`), `load_configs(configs)` (`:39`) stores configs, `register_all_tools(registry)` (`:87`) calls `connect_all()` (`:44`) which spins up `MCPClient` per server and wraps tools in `MCPToolWrapper`.\n\n**3a. Interactive path — `lantu/runtime/lifecycle.py`**\n- `initialize_runtime_mcp(runtime)` (`:219`): `manager.load_configs(runtime.config.mcp_servers)` (`:223`) → `manager.register_all_tools(runtime.registry)` (`:224`) → stores `runtime.mcp_manager` → **injects** `code_search.set_mcp_manager(manager)` (`:229-230`) → disables the `mcp_zvec_grep_*` tools (`:234`).\n\n**3b. Remote path — `lantu/remote.py`**\n- `RemoteServer` (built with `mcp_servers=config.mcp_servers` in `lantu/__main__.py:346`) → `_connect_mcp` (`:314-324`): `manager.load_configs` → `register_all_tools` → `code_search.set_mcp_manager(manager)` → disables `mcp_zvec_grep_*`.\n\n**4. Consumption — `lantu/tools/code_search.py`**\n- `CodeSearch.set_mcp_manager(manager)` (`:49`) stores it; `_semantic` (`:69`) calls `self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", ...)` (`:82`), falling back to local rg/Grep when the manager is absent or errors.\n\n**Chain:** `config.yaml` → `config.py:191` (MCPServerConfig) → `MCPManager.load_configs/connect_all` (`mcp/manager.py`) → `initialize_runtime_mcp` (`lifecycle.py:219`) or `RemoteServer._connect_mcp` (`remote.py`) → `CodeSearch.set_mcp_manager` (`code_search.py:49`) → `call_tool(\"zvec_grep\", \"zvec_grep_search\")`.",
+            "errors": []
+          },
+          {
+            "task": 3,
+            "prompt": "Explain how FileLedger state changes after ReadFile, after EditFile, and after a Session resume. Cite the implementation files.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/file_ledger.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 23.18,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I have the full picture. Here's how FileLedger state changes.\n\n## FileLedger state changes\n\n**Core data structures — `lantu/memory/file_ledger.py`**\nThree dicts in `FileLedger.__init__` (`:101`): `_entries` (path → latest `FileLedgerEntry`), `_observations` (tool_call_id → `FileReadObservation`), `_visible_ranges` ((path, hash) → merged ranges).\n\n**After ReadFile — record + mark visible**\n- `_record_file_ledger_event` (`lantu/agent.py:1341`) fires after tool execution (`:986`, `:1106`). For `ReadFile` it builds a `FileLedgerEntry` with `operation=\"read\"`, the file's sha256/content_hash, offset/limit, and current mtime (`:1383`), then `ledger.apply(entry)` (`:1394`) — storing the latest entry and, since operation is `\"read\"`, a `FileReadObservation` keyed by `tool_use_id` (`file_ledger.py:138`).\n- Later, `_prepare_tool_results` (`agent.py:1266`) marks which ranges actually reached conversation history via `mark_visible` (`file_ledger.py:165`) so future duplicate reads get deduped (`is_visible`, `:186`).\n\n**After EditFile — invalidate + record as latest**\n- `_record_file_ledger_event` (`agent.py:1341`) with `operation=\"edit\"`. Since it's not a read, it first calls `ledger.invalidate(path)` (`:1381`, `file_ledger.py:201`) which clears that file's `_visible_ranges`. Then `apply(entry)` (`:1394`) replaces the latest entry with the new hash/mtime and records a `file.updated` journal event (`:1392`). Old `_observations` for that tool_call_id are not read observations, so they aren't created.\n\n**After Session resume — replay events**\n- `SessionManager.resume` (`lantu/memory/session.py:397`) calls `_file_ledger_from_events(events)` (`:418`).\n- `_file_ledger_from_events` (`:761`) replays the journal's `file.observed` and `file.updated` events via `apply_payload` (`file_ledger.py:147`), reconstructing the latest entry per path and read observations.\n- **Notably, `_visible_ranges` are NOT persisted** — the constructor (`file_ledger.py:101`) starts them empty, so on resume visible ranges are cleared (they're a volatile projection per the docstring at `:98-99`). They get rebuilt as the conversation streams results again.\n\n**Key files:** `lantu/memory/file_ledger.py` (state + methods), `lantu/agent.py:1341/1266` (record + visibility), `lantu/memory/session.py:761` (resume replay).",
+            "errors": []
+          },
+          {
+            "task": 4,
+            "prompt": "Trace the decision path from context pressure measurement through stale tool cleanup and structured compaction to window rollover.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 37.122,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me read the core context manager auto-compact flow and the agent's decision point, plus session rollover.\n\n## Complete compaction decision path\n\n**1. Pressure measurement — `lantu/context/manager.py`**\n- `auto_compact` (`:1132`) calls `conversation.current_tokens()` (`:1152`) for token pressure, then `analyze_context_pressure` (`:1001`) which classifies into `\"none\"`, `\"soft\"`, or `\"hard\"` using `compute_compact_threshold` (`:576`): soft = `context_window - 20000 - 13000`, hard = `context_window - 20000 - 3000`.\n\n**2. Entry point — `lantu/agent.py`**\n- `auto_compact` is called at `:624` inside the agent's message loop, before every LLM request, with `at_user_boundary=(iteration==1)`.\n- Soft threshold check: `current < soft_threshold` → return `None` (`:1166`). Hard threshold skips the circuit breaker (`:1172`).\n\n**3. Policy decision — `CompactionPolicy.decide` (`context/manager.py:128`)**\nPure logic, no mutation. Returns one of:\n- `NONE` — pressure level is \"none\"\n- `DEFER` — not at user boundary, or soft pressure with healthy cache\n- `COMPACT_STALE_TOOLS` — stale tool tokens dominate old segments (`:1052`)\n- `WINDOW_ROLLOVER` — hard pressure AND an existing summary exists (`:150`)\n- `STRUCTURED_SUMMARY` — everything else\n\n**4a. Stale tool cleanup — `compact_stale_tool_results` (`context/manager.py:162`)**\nTriggered at `agent.py:1192`. Iterates old messages before `keep_start`, replaces sub-50KB inline tool results byte-for-byte, and persists larger ones to disk, replacing them with a file ref. Returns replacement tracking so the session journal gets updated.\n\n**4b. Structured compaction — `context/manager.py:1296-1320`**\n- Calls LLM to generate a `<summary>` from the prefix (`:1246-1263`).\n- `build_compact_messages` (`:657`) assembles a single user message containing summary + recovery attachment + keep_tail.\n- `conversation.replace_history(new_messages)` (`:1330`) resets the conversation to the compacted form and clears token anchors.\n\n**4c. Window rollover — `context/manager.py:1305-1313`**\n- `build_window_rollover_messages` (`:675`) assembles summary messages **without** a recovery attachment (it only carries artifact refs and transcript path instead).\n- `session.context_window_rolled_over` (`lantu/memory/session.py:241`) persists a `context.window.rolled_over` journal event with the new `window_id`, `parent_window_id`, the summary, kept message IDs, accumulated artifact refs, and the file ledger/schema epoch checkpoint. This creates a clean window projection within the same session.\n\n**5. Follow-up in agent**\n- After compaction/rollover, `file_ledger.clear_visible()` (`agent.py:651`), environment context and long-term memory are re-injected via `conversation.inject_environment` / `inject_long_term_memory` (`:652-656`).\n\n**Chain:** `conversation.current_tokens()` → `analyze_context_pressure` (`manager.py:1001`) → `CompactionPolicy.decide` (`:128`) → `compact_stale_tool_results` (`:162`, if dominant) or LLM summary → `build_compact_messages` (`:657`) / `build_window_rollover_messages` (`:675`) → `conversation.replace_history` (`:1330`) → optional `session.context_window_rolled_over` (`session.py:241`).",
+            "errors": []
+          },
+          {
+            "task": 5,
+            "prompt": "Explain how an oversized tool result is persisted, previewed in Conversation, and later made recoverable. Cite the relevant functions.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 35.825,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I have the complete lifecycle traced.\n\n## Oversized tool result lifecycle\n\nAll core logic lives in `lantu/context/manager.py`, orchestrated from `lantu/agent.py:1266` (`_prepare_tool_results`).\n\n**1. Persist — `persist_tool_result` (`manager.py:288`)**\n- Writes full content to `<session_dir>/<tool_use_id>.txt` (`os.O_EXCL`, so idempotent). Callers decide when.\n\n**2. Preview in Conversation — `prepare_tool_results_with_metadata` (`manager.py:443`)**\nTwo budget tiers, both replacing the inline `ToolResultBlock.content`:\n- **Single-result** (`:468-480`): if content exceeds `TOOL_RESULT_INLINE_CHAR_LIMIT`, `persist_tool_result` then `make_persisted_preview` (`:299`) → a `</persisted-output>` block with \"前 4KB + 后 1KB\" head/tail preview via `make_head_tail_preview` (`:339`). Recorded as mode `\"artifact\"` with `artifact_path`.\n- **Aggregate** (`:489-559`): if the turn's total exceeds `AGGREGATE_CHAR_LIMIT`, largest results are re-persisted/reduced to a shorter preview, and finally `make_persisted_reference` (`:330`) drops the body to just the file path.\n- Returns `PreparedToolResults(prepared, presentations)`; agent uses it at `agent.py:1299` and feeds the resulting `ToolResultBlock` into history.\n\n**3. Recovery paths (two distinct mechanisms)**\n\n- **RecoveryState snapshot — `RecoveryState` (`manager.py:750`)** + `build_recovery_attachment` (`:819`): during compaction, `agent.py` records ReadFile bytes (`record_file_read`) and skill SOPs (`record_skill_invocation`). On structured compaction, `auto_compact` calls `build_recovery_attachment` (`:1315`) to re-attach these file snapshots and active-tool list to the summary's user message, so working context survives history truncation.\n\n- **Persisted artifact index — `_persisted_artifact_refs` (`manager.py:707`)** + `build_window_rollover_messages` (`:675`): before window rollover, it regex-scans history for `完整内容已保存到：` paths (`:709`). On rollover the \"## 历史工具结果索引\" section (`:689-694`) lists them, and `session.context_window_rolled_over` (`lantu/memory/session.py:241`) also records `artifact_refs` so the full result file stays recoverable in the Journal while the window only keeps a reference.\n\n**Flow:** `prepare_tool_results_with_metadata` (`manager.py:443`) → `persist_tool_result` (`:288`) + `make_persisted_preview`/`make_persisted_reference` (`:299`/`:330`) → history holds only the preview → on compaction `build_recovery_attachment` (`:819`) re-attaches file snapshots; on rollover `_persisted_artifact_refs` (`:707`) + `build_window_rollover_messages` (`:675`) preserve the artifact index, keeping full results recoverable via the file path and Journal.",
+            "errors": []
+          },
+          {
+            "task": 6,
+            "prompt": "Trace how a tool schema view is recorded as a Schema Epoch and how that state is persisted for later requests or resume.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 36.491,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me read the key pieces: the ToolRegistry schema_epoch, agent's `_sync_schema_epoch`, and the session persist/replay logic.\n\nLet me read the SchemaEpoch dataclass, the session `record` method, and the resume replay.\n\nI have the complete flow traced.\n\n## Schema Epoch recording, persistence, and resume\n\n**1. Compute the epoch — `ToolRegistry.schema_epoch` (`lantu/tools/__init__.py:279`)**\nBuilds a canonical dict (protocol, `loading_mode`, per-tool `name`+`schema_hash`, `deferred_tools`), hashes it, and returns a `SchemaEpoch` (`__init__.py:16`) with `epoch_id=f\"schema-{fingerprint[:16]}\"`, `visible_tools`, `deferred_tools`. `to_payload()` (`:26`) serializes it. A fingerprint change means the model-visible tool view changed.\n\n**2. Record on change — `Agent._sync_schema_epoch` (`lantu/agent.py:1122`)**\n- Called before each provider request (`agent.py:661`). If `epoch.epoch_id == self._schema_epoch_id`, it's a no-op (`:1125`) — the view is stable, no new epoch.\n- On change, computes a `reason` (initial / mode_changed / tool_loaded / schema_changed, `:1132-1139`) and writes it via `session.record(ExecutionEvent(\"tool.schema.epoch.changed\", payload))` (`:1145`), then caches `self._schema_epoch_id` (`:1148`).\n- The id is attached to each request for correlation (`agent.py:668` → `lantu/tools/lens/request_trace.py:58`).\n\n**3. Persist — `Session.record` (`lantu/memory/session.py:191`)**\nAppends the `tool.schema.epoch.changed` event to the session journal (`:194`) and caches `self.schema_epoch = dict(event.payload)` (`:200-201`) for in-memory access. The epoch is also embedded in the `context.window.rolled_over` payload (`session.py:278`) so it survives a window switch.\n\n**4. Resume — replay from journal (`lantu/memory/session.py:771`)**\n- `SessionManager.resume` (`session.py:397`) calls `_schema_epoch_from_events(events)` (`:771`), which replays the journal keeping the **latest** `tool.schema.epoch.changed` payload, and passes it into `Session(schema_epoch=...)` (`:419`).\n- `Agent.__init__` restores `self._schema_epoch_id` from `session.schema_epoch` (`agent.py:345-346`), so the next `_sync_schema_epoch` call can correctly detect whether the view diverged from the persisted epoch.\n\n**Flow:** `ToolRegistry.schema_epoch` (`tools/__init__.py:279`) → `_sync_schema_epoch` (`agent.py:1122`) → `session.record` (`session.py:191`) appends to journal → `_schema_epoch_from_events` (`session.py:771`) replays latest on resume → `agent.py:345` restores the id.",
+            "errors": []
+          },
+          {
+            "task": 7,
+            "prompt": "Trace how Session Journal events rebuild Conversation and FileLedger during resume, including the functions that replay events.",
+            "expected_paths": [
+              "lantu/memory/session.py",
+              "lantu/memory/file_ledger.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 44.649,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "Let me read the start of `_project_messages` and the ledger/append functions.\n\nHere's the full resume flow.\n\n## Resume: Journal events → Conversation + FileLedger\n\n**1. Entry — `SessionManager.resume` (`lantu/memory/session.py:397`)**\n\n**2. Read raw journal — `journal.read()` (`session.py:404`)**\nDelegates to `SessionJournal.read_file` (`lantu/memory/journal.py:167`) which reads `<session_id>.jsonl`, parses each NDJSON line into `JournalEvent.from_dict`, validates sequence order (`:200`).\n\n**3. Close dangling state — `_append_interruption_events` (`session.py:794`)**\nScans for unclosed `runtime.started`/`turn.started`/`tool.started`/`model.request.started` and appends interruption events (`:829+`). Then `events = journal.read()` (`:406`) re-reads to include the injected events.\n\n**4. Rebuild message projection — `_project_messages(events)` (`session.py:630`)**\nIterates every event assembling `[(message_id, Message)]`:\n- `message.created` (`:634`) → `_message_from_payload` (`:638`) deserializes the full Message object from the JSON payload.\n- `context.compacted` (`:641`) → resets projection to summary message (`:648`) + kept_message_ids.\n- `context.window.rolled_over` (`:662`) → resets to window summary + `artifact_refs` + kept_message_ids.\n- `context.tool_results_compacted` (`:688`) → patches `result.content` by `tool_use_id` in existing projected messages.\n\n**5. Rebuild FileLedger — `_file_ledger_from_events(events)` (`session.py:761`)**\nReplays `file.observed` / `file.updated` events via `ledger.apply_payload` (`file_ledger.py:147`). Each call reconstructs the `FileLedgerEntry` from the payload and stores it as the latest entry per path (`file_ledger.py:136-137`), plus records `FileReadObservation` for `file.observed` entries.\n\n**6. Rebuild Schema Epoch — `_schema_epoch_from_events(events)` (`session.py:771`)**\nWalks events, keeping the latest `tool.schema.epoch.changed` payload in memory.\n\n**7. Wire into Session — `Session.__init__` (`session.py:112`)**\nConstructed with the fresh journal handle, the projected `file_ledger`, `schema_epoch**7. Wire into Session — `Session.__init__` (`session.py:112`)**\nConstructed with the fresh journal handle, `file_ledger=`, `schema_epoch=`, `loaded_tool_states=`, `active_window_id=`. Then `session._register_projected_messages(projected)` (`session.py:425`) populates `_message_ids: dict[id, str]` mapping python `id(message)` → string message_id, which is needed by later journal append calls.\n\n**8. Return — `ResumeResult` (`session.py:427`)**\nContains the `session` object and the flat `messages` list (the projected Conversation ordering). The caller (`lantu/agent.py:319-344`) uses `messages` to populate `ConversationManager.history` and restores `file_ledger`/`schema_epoch` from the `session` object.\n\n**9. Conversation rebuild — `agent.py` (`:319-344`)**\n- `session.file_ledger` is assigned to `self.file_ledger` (`:344`).\n- `session.schema_epoch` is read and `self._schema_epoch_id` is restored (`:345-346`).\n- `loaded_tool_states` (from `_tool_schema_states(events)`, `:756`) tells the registry which tools were visible at resume time.\n- The projected messages re-populate `ConversationManager.history` so the next request sees the correct compacted/rolled-over view.\n\n**Summary chain:**\n`journal.read_file` (`journal.py:167`) → `_append_interruption_events` (`session.py:794`) → `_project_messages` (`session.py:630`) + `_file_ledger_from_events` (`:761`) + `_schema_epoch_from_events` (`:771`) → `Session(...)` (`:412`) → `_register_projected_messages` (`:425`) → `agent.py:319-346` wires both Conversation history and FileLedger into the resumed agent.",
+            "errors": []
+          },
+          {
+            "task": 8,
+            "prompt": "Trace the complete CodeSearch fallback chain when zvec semantic or exact MCP search fails, down to native rg and Python Grep.",
+            "expected_paths": [
+              "lantu/tools/code_search.py",
+              "lantu/tools/grep.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 14.117,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Here's the complete CodeSearch fallback chain.\n\n## CodeSearch fallback chain (`lantu/tools/code_search.py`)\n\n**Entry — `execute` (`:52`)** routes by mode: `semantic` or auto-detected natural-language query (`_looks_semantic`, `:65`) → `_semantic`; else → `_exact`.\n\n### Semantic path — `_semantic` (`:69`)\n1. **No manager** (`:70`): straight to `_fallback_exact`.\n2. **zvec MCP semantic** (`:82`): `call_tool(\"zvec_grep\", \"zvec_grep_search\", ...)`. On success returns `backend=\"zvec_grep_search\"`. On `isError` or exception (`:91`) → `_fallback_exact` with `semantic_error` recorded.\n\n### Exact path — `_exact` (`:115`)\n1. **zvec MCP exact** (`:123`): `call_tool(\"zvec_grep\", \"zvec_grep_rg\", ...)` (command built by `_rg_command`, `:139`). On success returns `backend=\"zvec_grep_rg\"`. On failure captures `mcp_error` → falls through to `_fallback_exact`.\n\n### Shared fallback — `_fallback_exact` (`:96`)\n1. **Native `rg`** — `_local_rg` (`:146`): `shutil.which(\"rg\")`; if missing returns `None` (`:148-149`). Runs `rg -n --no-heading --color never ...` via `asyncio.to_thread` (`:169`). Returncode 0 → matches; 1 → \"No matches found.\"; else `None` → continues down.\n2. **Python `Grep`** (`:104-113`): sets `self._grep.work_dir` and executes the built-in `Grep` tool (`lantu/tools/grep.py:39`), which globs files and regex-matches each line (`grep.py:56-75`), returning `backend=\"python_grep\"`.\n\n### Degradation markers\n- Every fallback result sets `meta[\"degraded\"]=True` (`:100`, `:110`); the semantic path adds `semantic_fallback=True` (`:101`, `:111`), while the exact path pops it (`:136`) since exact fallback isn't a semantic downgrade.\n\n**Chain:** zvec `zvec_grep_search`/`zvec_grep_rg` (MCP) → native `rg` binary (`_local_rg`, `:146`) → Python `Grep.execute` (`lantu/tools/grep.py:39`).",
+            "errors": []
+          }
+        ]
+      }
+    ]
+  },
+  "optimized": {
+    "summary": {
+      "runs": 3,
+      "tasks_passed": {
+        "values": [
+          6.0,
+          7.0,
+          7.0
+        ],
+        "mean": 6.667,
+        "stddev": 0.471
+      },
+      "elapsed_seconds": {
+        "values": [
+          279.052,
+          267.015,
+          273.844
+        ],
+        "mean": 273.304,
+        "stddev": 4.929
+      },
+      "total_tool_calls": {
+        "values": [
+          68.0,
+          92.0,
+          90.0
+        ],
+        "mean": 83.333,
+        "stddev": 10.873
+      },
+      "read_file_calls": {
+        "values": [
+          46.0,
+          55.0,
+          49.0
+        ],
+        "mean": 50.0,
+        "stddev": 3.742
+      },
+      "input_tokens": {
+        "values": [
+          150415.0,
+          128873.0,
+          152436.0
+        ],
+        "mean": 143908.0,
+        "stddev": 10663.318
+      },
+      "cache_read_tokens": {
+        "values": [
+          2145792.0,
+          1747968.0,
+          2036736.0
+        ],
+        "mean": 1976832.0,
+        "stddev": 167843.877
+      },
+      "output_tokens": {
+        "values": [
+          19893.0,
+          17875.0,
+          20353.0
+        ],
+        "mean": 19373.667,
+        "stddev": 1076.228
+      },
+      "errors": 0,
+      "tasks_total_per_run": 8
+    },
+    "runs": [
+      {
+        "variant": "optimized_zg_1",
+        "model": "deepseek-v4-flash",
+        "tasks_passed": 6,
+        "tasks_total": 8,
+        "elapsed_seconds": 279.052,
+        "tool_calls": {
+          "CodeSearch": 21,
+          "Glob": 1,
+          "ReadFile": 46
+        },
+        "total_tool_calls": 68,
+        "read_file_calls": 46,
+        "input_tokens": 150415,
+        "cache_read_tokens": 2145792,
+        "output_tokens": 19893,
+        "errors": [],
+        "tasks": [
+          {
+            "task": 1,
+            "prompt": "Trace the complete path from YAML provider configuration loading to the final OpenAI-compatible chat completion request. Name the key functions and files.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/client.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 37.428,
+            "tool_calls": [
+              "CodeSearch",
+              "Glob",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch"
+            ],
+            "answer": "I'll trace the configuration-to-request path. Let me explore the codebase structure first.\n\nLet me look at the serialization functions and the client's chat method.\n\nLet me confirm where the provider is selected from config.providers in the entry point.\n\n完整的路径如下：\n\n---\n\n### 1. YAML 加载 → `lantu/config.py`\n\n| 步骤 | 函数 | 文件:行 |\n|------|------|----------|\n| 入口 | `load_config()` | `lantu/config.py:278` |\n| 候选文件 | 依次尝试 `~/.lantu/config.yaml` → `.lantu/config.yaml` → `.lantu/config.local.yaml` | `lantu/config.py:284-289` |\n| 解析单个文件 | `_load_single_file()` → `yaml.safe_load()` | `lantu/config.py:168` |\n| 结构校验 | `validate_config_structure(raw)` | `lantu/validator.py` |\n| 构建 dataclass | 遍历 `providers` 列表 → `ProviderConfig(...)` | `lantu/config.py:176-188` |\n| 合并多文件 | `_merge_config()`（home + project + local 三层叠加） | `lantu/config.py:250-275` |\n\n### 2. Provider 选择\n\n| 模式 | 方式 | 文件:行 |\n|------|------|----------|\n| 非交互 | `config.providers[0]` | `lantu/__main__.py:376` |\n| inline UI | `select_provider(config.providers)`（交互式选择） | `lantu/__main__.py:260` |\n\n### 3. Client 创建 → `lantu/client.py`\n\n| 步骤 | 函数 | 文件:行 |\n|------|------|----------|\n| 工厂 | `create_client(config)` → 按 `protocol` 分发 | `lantu/client.py:740` |\n| openai-compat | `OpenAICompatClient.__init__()` | `lantu/client.py:561` |\n| 构造底层 SDK | `self._client = AsyncOpenAI(api_key, base_url=config.base_url)` | `lantu/client.py:572` |\n| 解析 API key | `ProviderConfig.resolve_api_key()` → `${ENV_VAR}` 插值 → 环境变量 fallback | `lantu/config.py:48` |\n\n调用入口在 `lantu/runtime/builder.py:87` → `_build_core()` → `create_client(provider)`.\n\n### 4. 消息序列化 → `lantu/serialization.py`\n\n| 函数 | 文件:行 | 格式 |\n|------|----------|------|\n| `build_chat_completion_messages()` | `lantu/serialization.py:99` | Chat Completions 格式（`role`/`content`/`tool_calls`/`reasoning_content`） |\n| `build_messages()` | `lantu/serialization.py:145` | 按 `protocol` 分发到上述函数（`openai-compat` 走 `build_chat_completion_messages`） |\n\n### 5. 最终 HTTP 请求 → `lantu/client.py`\n\n| 步骤 | 代码 | 文件:行 |\n|------|------|----------|\n| 构造 kwargs | `kwargs = {\"model\", \"messages\", \"max_tokens\", \"stream\", \"stream_options\", \"extra_headers\", \"tools\"}` | `lantu/client.py:618-632` |\n| Lens 拦截 | `_record_prepared_request(kwargs)`### 5. 最终 HTTP 请求 → `lantu/client.py`（续）\n\n| 步骤 | 代码 | 文件:行 |\n|------|------|----------|\n| 构造 kwargs | `kwargs = {\"model\", \"messages\", \"max_tokens\", \"stream\", \"stream_options\", \"extra_headers\", \"tools\"}` | `lantu/client.py:618-632` |\n| Lens 拦截 | `_record_prepared_request(kwargs)` | `lantu/client.py:633` |\n| 发送请求 | `await self._client.chat.completions.create(**kwargs)` | `lantu/client.py:642` |\n| 流式响应处理 | 遍历 `chunk.choices[0].delta` → yield `TextDelta` / `ThinkingDelta` / `ToolCallStart`/`ToolCallDelta`/`ToolCallComplete` | `lantu/client.py:643-722` |\n\n### 总览\n\n```\nload_config()                          lantu/config.py:278\n  └─ _load_single_file()               lantu/config.py:168\n      └─ yaml.safe_load()              lantu/config.py:170\n      └─ validate_config_structure()   lantu/validator.py\n      └─ ProviderConfig()              lantu/config.py:176-188\n  └─ _merge_config()                   lantu/config.py:250\n        ↓\nselect_provider(config.providers)      lantu/__main__.py:260 / 376\n        ↓\ncreate_client(provider)                lantu/client.py:740\n  └─ OpenAICompatClient(config)        lantu/client.py:561\n      └─ AsyncOpenAI(api_key, base_url)  lantu/client.py:572\n        ↓\nclient.stream(conversation, system, tools)  lantu/client.py:604\n  └─ build_chat_completion_messages()  lantu/serialization.py:99\n  └─ self._client.chat.completions.create(**kwargs)  lantu/client.py:642\n      → 实际 HTTP POST 到 {base_url}/chat/completions\n```",
+            "errors": []
+          },
+          {
+            "task": 2,
+            "prompt": "Trace how MCP server configuration becomes a connected manager and is injected into CodeSearch at runtime.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/runtime/lifecycle.py",
+              "lantu/tools/code_search.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 22.827,
+            "tool_calls": [
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the MCP path from config to CodeSearch. Let me find the relevant files.\n\nNow let me find where `set_mcp_manager` is called and how the manager is created from config.\n\nNow let me read the injection site and confirm the config source.\n\nNow I have the full path. Here's the trace:\n\n---\n\n### 1. Config → `MCPServerConfig` dataclass\n\nYAML 中的 `mcp_servers` 列表被 `_load_single_file()` → `validate_config_structure()` 校验后，构建为 `MCPServerConfig` 对象列表，存入 `AppConfig.mcp_servers`。\n\n**文件**: `lantu/config.py:192-200`\n\n```python\nmcp_servers = [\n    MCPServerConfig(\n        name=s[\"name\"],\n        command=s.get(\"command\"),\n        args=s.get(\"args\", []),\n        url=s.get(\"url\"),\n        headers=s.get(\"headers\", {}),\n        env=s.get(\"env\", {}),\n    )\n    for s in validated.get(\"mcp_servers\", [])\n]\n```\n\n### 2. 启动触发 → `_start_runtime_services()`\n\n**文件**: `lantu/runtime/builder.py:355-357`\n\n```python\nif runtime.config.mcp_servers:\n    runtime.mcp_task = asyncio.create_task(initialize_runtime_mcp(runtime))\n```\n\n### 3. 连接 & 注册 → `initialize_runtime_mcp()`\n\n**文件**: `lantu/runtime/lifecycle.py:219-251`\n\n```\nMCPManager()                            # 创建 manager\n  └─ manager.load_configs(config.mcp_servers)   # 加载配置\n  └─ manager.register_all_tools(registry)       # 连接所有服务器 + 注册工具到 registry\n      └─ connect_all()                          # 逐个连接\n          └─ MCPClient(config).connect()        # 建立 stdio/SSE 连接\n          └─ client.list_tools()                # 获取工具列表\n          └─ MCPToolWrapper(name, tool_def, client)  # 包装为 Tool\n          └─ registry.register(wrapper)         # 注册到全局 ToolRegistry\n```\n\n### 4. 注入 CodeSearch → `lantu/runtime/lifecycle.py:228-230`\n\n```python\ncode_search = runtime.registry.get(\"CodeSearch\")\nif code_search is not None and hasattr(code_search, \"set_mcp_manager\"):\n    code_search.set_mcp_manager(manager)\n```\n\n### 5. CodeSearch 内部使用 → `lantu/tools/code_search.py`\n\n- `set_mcp_manager(manager)` — 保存 manager 引用，文件:行 49-50\n- `_semantic()` — 若 `self._mcp_manager` 不为 None，调用 `call_tool(\"zvec_grep\", \"zvec_grep_search\", ...)`，文件:行 69-94\n- `_exact()` — 优先尝试 `call_tool(\"zvec_grep\", \"zvec_grep_rg\", ...)`，失败后回退本地 rg，文件:行 115-137\n\n### 完整链路\n\n```\nconfig.yaml → AppConfig.mcp_servers          lantu/config.py\n  ↓\n_start_runtime_services()                     lantu/runtime/builder.py:355\n  ↓\ninitialize_runtime_mcp(runtime)               lantu/runtime/lifecycle.py:219\n  ├─ MCPManager.load_configs()                lantu/mcp/manager.py:39\n  ├─ MCPManager.register_all_tools()          lantu/mcp/manager.py:87\n  │   ├─ MCPClient(config).connect()          lantu/mcp/client.py\n  │   ├─ client.list_tools()\n  │   └─ registry.register(MCPToolWrapper)\n  ├─ registry.get(\"CodeSearch\")               lantu/tools/code_search.py:43\n  └─ code_search.set_mcp_manager(manager)     lantu/tools/code_search.py:49\n```",
+            "errors": []
+          },
+          {
+            "task": 3,
+            "prompt": "Explain how FileLedger state changes after ReadFile, after EditFile, and after a Session resume. Cite the implementation files.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/file_ledger.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 26.111,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Now I have the complete picture. Here's the answer:\n\n---\n\n## FileLedger state changes\n\n### After ReadFile (`lantu/tools/read_file.py`)\n\n1. `ReadFile.execute()` reads file content, records in `FileStateCache` (`file_state_cache.py:18-20`)\n2. Post-execution, `Agent._record_file_ledger_event()` (`agent.py:1341-1394`) is called:\n   - `FileLedger.build_entry(path, content, operation=\"read\", offset, limit, tool_call_id)` → SHA256 hash + metadata (`file_ledger.py:113-134`)\n   - `ledger.apply(entry)` → stores as latest entry per path **and** creates a `FileReadObservation` keyed by `tool_call_id` (`file_ledger.py:137-145`)\n   - Session records `ExecutionEvent(\"file.observed\", entry_payload)` into NDJSON journal\n\n3. Later, `_prepare_tool_results()` (`agent.py:1266-1339`) reads the observation and calls `ledger.mark_visible(path, hash, range_start, range_end)` with the actual line range that reached conversation history.\n\n### After EditFile (`lantu/tools/edit_file.py`)\n\n1. `EditFile.execute()` checks `FileStateCache` gate (`file_state_cache.py:22-42`), writes file, calls `cache.invalidate()` + `state_cache.update()`\n2. Post-execution, `Agent._record_file_ledger_event()`:\n   - Calls `ledger.invalidate(path)` — **clears all visible ranges** for that path (`file_ledger.py:201-205`)\n   - `FileLedger.build_entry(path, content, operation=\"edit\")` → replaces the entry for that path with the new version hash\n   - `ledger.apply(entry)` → stores as latest entry (no new observation since operation != \"read\")\n   - Session records `ExecutionEvent(\"file.updated\", entry_payload)` into NDJSON journal\n\n### After Session resume (`lantu/memory/session.py`)\n\n1. `SessionManager.resume(session_id)` (`session.py:397-434`):\n   - Replays all events from the NDJSON journal via `journal.read()`\n   - Calls `_file_ledger_from_events(events)` (`session.py:761-768`):\n     - Creates a fresh `FileLedger()`\n     - Iterates all `\"file.observed\"` and `\"file.updated\"` events\n     - Calls `ledger.apply_payload(payload)` for each, replaying **the latest entry per path** (last writer wins since `_entries` is a `dict[str, FileLedgerEntry]`)\n   - Passes the rebuilt `FileLedger` into `Session(..., file_ledger=...)`\n2. `Agent.__init__` (`agent.py:344`): `self.file_ledger = getattr(session, \"file_ledger\", None) or FileLedger()` — picks up the rebuilt ledger\n\nKey point: `_observations` (read history) and `_entries` (latest version) are restored from journal events, but `_visible_ranges` is **not persisted** — it's a transient conversation projection that resets to empty on resume.",
+            "errors": []
+          },
+          {
+            "task": 4,
+            "prompt": "Trace the decision path from context pressure measurement through stale tool cleanup and structured compaction to window rollover.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 55.568,
+            "tool_calls": [
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the context-pressure → compaction → rollover decision path. Let me start by finding the key components.\n\nLet me read the `auto_compact` function and the window rollover handling.\n\nNow let me look at the window rollover handler and how the CompactEvent's WINDOW_ROLLOVER action is consumed.\n\nLet me read the middle of `auto_compact` (1228-1330) to see how structured compaction builds the summary and rolls over the window.\n\nNow I have the full path. Here's the trace:\n\n---\n\n## Context pressure → cleanup → compaction → window rollover\n\n### 1. Pressure measurement\n\n**`Agent._run_core`** (`lantu/agent.py:623-637`) calls `auto_compact()` each iteration. Its token anchor is real API usage (`conversation.current_tokens()`).\n\n**`analyze_context_pressure()`** (`lantu/context/manager.py:1000-1069`) classifies pressure without mutation:\n\n- `_compute_keep_start_index()` splits history into old prefix vs. recent tail (`manager.py:1006`, impl at `:909`)\n- Tracks 3 sources: `stale_tool_tokens`, `old_conversation_tokens`, `existing_summary_tokens` (`:1010-1025`)\n- Levels via dual thresholds (`compute_compact_threshold`, `manager.py:576-579`): `none` → `soft` → `hard`\n- Sets `recommended_action`: `window_rollover_candidate` when `hard` **and** a previous summary already exists (`:1048-1051`)\n\n### 2. Threshold gate + circuit breaker\n\nInside `auto_compact` (`manager.py:1152-1179`):\n\n- Below **soft** line (`effectiveWindow − 13K`) → return `None`\n- At **hard** line (`effectiveWindow − 3K`) → force compaction (bypass breaker)\n- Between them → `CompactCircuitBreaker.is_open()` (3 consecutive failures) blocks auto-compact (`:1077-1090`)\n\n### 3. Policy decision\n\n**`CompactionPolicy.decide()`** (`manager.py:128-159`) — pure rule table:\n\n- `none` → `NONE` (`:144`)\n- not at user boundary → `DEFER` (`:147-148`)\n- `hard` + existing summary → `WINDOW_ROLLOVER` (`:150-151`)\n- `recommended_action == compact_stale_tools` → `COMPACT_STALE_TOOLS` (`:153-154`)\n- `soft` + healthy prefix cache → `DEFER` (`:156-157`)\n- else → `STRUCTURED_SUMMARY` (`:159`)\n\n### 4. Execution branches\n\n**Stale tool cleanup** — `compact_stale_tool_results()` (`manager.py:162-220`): evicts old tool previews before `keep_start`, persisting large results to disk and reducing them to references. Applies via `conversation.replace_history_preserving_runtime()` (`:1214`).\n\n**Structured compaction** (`manager.py:1228-1334`):\n- Summarizes only the prefix `messages[:keep_start]` via a nested LLM call (`client.stream`, `:1258-1278`), keeping the recent tail verbatim (`keep_tail`)\n- Hard-pressure retry drops 1/5 of message groups (`:1283-1291`)\n- **Rollover branch** (`:1305-1313`): if `policy_action == WINDOW_ROLLOVER`, builds messages via `build_window_rollover_messages()` (`:675-704`) with a tighter `_compute_rollover_keep_tail` capped at `ROLLOVER_KEEP_MAX_TOKENS = 4000` (`:969-977`, const `:49`)\n- Otherwise `build_compact_messages()` (`:657-672`) with a recovery attachment\n- `conversation.replace_history()` + `reset_appendix_baseline()` (`:1330-1334`), clears the usage anchor\n\n### 5. Window rollover persistence\n\n**`Agent`** emits `CompactNotification` (`agent.py:638-656`), clearing the file ledger's visible ranges.\n\n**`InlineApp.persist_compact_boundary()`** (`lantu/ui/inline/app.py:400-414`) dispatches on `action`:\n- `WINDOW_ROLLOVER` → `Session.context_window_rolled_over(summary, keep, artifact_refs)` (`lantu/memory/session.py:241-287`): appends a `context.window.rolled_over` Journal event with a new `window_id`, `parent_window_id`, `archived_until_sequence`, and artifact refs; updates `active_window_id` and meta summary\n- else → `Session.context_compacted()`\n- `tool_result_replacements` → `Session.tool_results_compacted()`\n\n### Path summary\n\n```\nAgent._run_core                                  agent.py:623\n  └─ auto_compact()                              context/manager.py:1132\n      ├─ conversation.current_tokens()  (usage anchor)\n      ├─ analyze_context_pressure()              manager.py:1000 → levels + recommended_action\n      ├─ dual-threshold gate + circuit breaker   manager.py:1162-1179\n      ├─ CompactionPolicy.decide()               manager.py:128  → 4 possible actions\n      ├─ compact_stale_tool_results()            manager.py:162  (evict old previews)\n      ├─ structured summary via LLM              manager.py:1253-1301\n      └─ build_window_rollover_messages()        manager.py:675  (rollover) vs build_compact_messages() (:657)\n  └─ CompactNotification                         agent.py:638\n  └─ persist_compact_boundary()                  ui/inline/app.py:400\n      └─ Session.context_window_rolled_over()    memory/session.py:241 → Journal event\n```",
+            "errors": []
+          },
+          {
+            "task": 5,
+            "prompt": "Explain how an oversized tool result is persisted, previewed in Conversation, and later made recoverable. Cite the relevant functions.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 34.315,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the oversized tool-result path. Let me find the persistence and preview functions.\n\n\n\nLet me check the recovery attachment and where the artifact refs get used later.\n\nHere's the full trace of an oversized tool result's lifecycle:\n\n---\n\n## Oversized tool result: persist → preview → recover\n\n### 1. Persist + preview (finalize before history)\n\n**`prepare_tool_results_with_metadata()`** (`lantu/context/manager.py:443-488`) is called each turn (from `Agent._prepare_tool_results`, `lantu/agent.py:1299`). For each result over `TOOL_RESULT_INLINE_CHAR_LIMIT` (8KB, `manager.py:23`):\n\n- `persist_tool_result(tool_use_id, content, session_dir)` (`manager.py:288-296`) → atomically writes the **full content** to `.lantu/session/tool-results/{tool_use_id}.txt`\n- `make_persisted_preview(content, path)` (`manager.py:299-327`) → replaces it in-conversation with a `<persisted-output>` marker + head/tail preview\n- Preview trimmed by `make_head_tail_preview()` (`manager.py:339-352`): head `TOOL_RESULT_HEAD_CHARS` (4096) + tail `TOOL_RESULT_TAIL_CHARS` (1024)\n- Records `ToolResultPresentation(mode=\"artifact\", artifact_path=str(path))` (`manager.py:475-479`)\n\nFile reads use a separate line-aware path: `make_file_read_preview()` (`manager.py:385-440`) keeps complete numbered lines and returns `visible_line_ranges`, which `Agent._prepare_tool_results` feeds to `file_ledger.mark_visible()` (`agent.py:1317-1338`).\n\n### 2. In-conversation state\n\nThe `ToolResultBlock` now carries only the preview string (the `<persisted-output>` marker with the artifact path), keeping the Conversation compact.\n\n### 3. Recovery paths\n\n**a) Local stale-tool eviction** — `compact_stale_tool_results()` (`manager.py:162-220`): regex-matches the `<persisted-output>` path (`:177`), then reduces the preview to a bare reference via `make_persisted_reference()` (`manager.py:330-336`) — dropping the preview body, keeping only `完整内容已保存到：{path}`. The disk artifact is untouched.\n\n**b) Structured compaction / window rollover** — `_persisted_artifact_refs()` (`manager.py:707-720`) collects all artifact paths from conversation content and tool results. These `artifact_refs` are:\n- Attached to the rebuilt summary via `build_window_rollover_messages(..., artifact_refs)` (`manager.py:675-704`)\n- Persisted in the Journal via `Session.context_window_rolled_over()` (`lantu/memory/session.py:258-259`) — but the full bodies stay on disk, owned by the Session; the new window only references the index.\n\n**c) Recovery snapshot** — `RecoveryState.record_file_read()` (`manager.py:763`) + `build_recovery_attachment()` (`manager.py:819-888`) re-attach recent read file contents and skill SOPs to the post-compact summary so the model retains working context.\n\n**Recoverability guarantee**: the full result lives at `.lantu/session/tool-results/{tool_use_id}.txt` on disk, referenced by path. If needed, the model re-reads it (the `TranscriptPath` hint in compact messages, `manager.py:666`/`699`). Session deletion is the owner of artifact cleanup (`cleanup_tool_results`, `manager.py:250`; `SessionManager.delete`, `lantu/memory/session.py:437-451`).\n\n### Summary\n\n```\nToolResult (oversized, >8KB)\n  └─ persist_tool_result()          manager.py:288   → full bytes on disk\n  └─ make_persisted_preview()       manager.py:299   → <persisted-output> marker + head/tail preview in Conversation\n      └─ ToolResultPresentation(mode=\"artifact\")      → visible ranges to FileLedger (for file reads)\n  Recover:\n    ├─ make_persisted_reference()   manager.py:330   → compact to bare path ref\n    ├─ _persisted_artifact_refs()   manager.py:707   → index attached to rollover summary / Journal\n    └─ build_recovery_attachment()  manager.py:819   → re-attach to compacted summary\n```",
+            "errors": []
+          },
+          {
+            "task": 6,
+            "prompt": "Trace how a tool schema view is recorded as a Schema Epoch and how that state is persisted for later requests or resume.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 48.265,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the Schema Epoch recording and persistence path. Let me find the relevant code.\n\nI have the complete trace now.\n\n---\n\n## Tool Schema Epoch: record → persist → resume\n\n### 1. Recording (per request cycle)\n\n**Trigger** — `Agent._run_core` calls `self._sync_schema_epoch()` before the main model request (`lantu/agent.py:661`).\n\n**`_sync_schema_epoch()`** (`lantu/agent.py:1122-1148`):\n- `epoch = self.registry.schema_epoch(self.protocol)` → computes current schema view\n- No-op if `epoch.epoch_id == self._schema_epoch_id` (unchanged)\n- Else derives a `reason`: `initial` / `mode_changed` / `tool_loaded` / `schema_changed` (`:1132-1139`)\n- Persists via `session.record(ExecutionEvent(\"tool.schema.epoch.changed\", payload))` (`:1145-1147`)\n- Updates `self._schema_epoch_id` (`:1148`)\n\n**Epoch computation** — `ToolRegistry.schema_epoch()` (`lantu/tools/__init__.py:279-304`):\n- `get_all_schemas(protocol)` → per-schema `schema_hash` via `_schema_hash()`\n- Builds a canonical dict (protocol + loading_mode + schema hashes + deferred tools), then `fingerprint = _schema_hash(canonical)`\n- Returns `SchemaEpoch(epoch_id=f\"schema-{fingerprint[:16]}\", ...)` (`:297-304`)\n\n**Payload** — `SchemaEpoch.to_payload()` (`lantu/tools/__init__.py:26-34`) carries `epoch_id`, `fingerprint`, `protocol`, `loading_mode`, `visible_tools`, `deferred_tools`. Defined on the dataclass (`:16-34`).\n\n### 2. Persistence\n\n**`Session.record()`** (`lantu/memory/session.py:191-202`):\n- Appends an NDJSON `tool.schema.epoch.changed` event to the session journal (`:194-199`)\n- Updates in-memory `self.schema_epoch` (`:200-201`, field set at `:125`)\n\n**Request tagging** — the active `schema_epoch_id` is passed into the stream for lens capture: `request_recorder.stream(..., schema_epoch_id=self._schema_epoch_id)` (`lantu/agent.py:668`).\n\n**Rollover propagation** — `Session.context_window_rolled_over()` embeds `self.schema_epoch` into the rollover event payload (`lantu/memory/session.py:278`).\n\n### 3. Resume\n\n**`SessionManager.resume()`** (`lantu/memory/session.py:397-434`):\n- `_schema_epoch_from_events(events)` (`session.py:771-777`) → scans the journal, keeps the **latest** `tool.schema.epoch.changed` payload\n- `_tool_schema_states(events)` (`session.py:740`) → restores loaded tool-state views\n- Passes both into `Session(..., loaded_tool_states=..., schema_epoch=...)` (`:417-419`)\n\n**Agent pickup** — `Agent.__init__` (`lantu/agent.py:345-350`): reads `session.schema_epoch` → `self._schema_epoch_id = session_epoch.get(\"epoch_id\")`. So on the next `_sync_schema_epoch()` call, the agent detects whether the schema view has drifted from the resumed epoch and re-records only if needed.\n\n### Path summary\n\n```\nAgent._run_core                                   agent.py:661\n  └─ _sync_schema_epoch()                         agent.py:1122\n      ├─ ToolRegistry.schema_epoch(protocol)      tools/__init__.py:279  → fingerprint + epoch_id\n      ├─ reason = initial/mode_changed/tool_loaded/schema_changed       agent.py:1132-1139\n      └─ session.record(\"tool.schema.epoch.changed\", payload)           agent.py:1145\n          └─ Session.record()                     session.py:191  → NDJSON journal event + session.schema_epoch\n  └─ stream(..., schema_epoch_id=...)             agent.py:668   (lens capture)\nResume:\n  └─ SessionManager.resume()                      session.py:397\n      ├─ _schema_epoch_from_events(events)        session.py:771  (latest epoch payload)\n      └─ Session(schema_epoch=...) → Agent.__init__  agent.py:345  → _schema_epoch_id restored\n```",
+            "errors": []
+          },
+          {
+            "task": 7,
+            "prompt": "Trace how Session Journal events rebuild Conversation and FileLedger during resume, including the functions that replay events.",
+            "expected_paths": [
+              "lantu/memory/session.py",
+              "lantu/memory/file_ledger.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 36.71,
+            "tool_calls": [
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "I'll trace the journal event replay path for resume. Let me find the replay/projection functions.\n\n\n\nNow let me read the key replay functions `_project_messages` and `_register_projected_messages`.\n\nI have the complete trace.\n\n---\n\n## Session Journal → Conversation + FileLedger rebuild on resume\n\n### 1. Entry — `SessionManager.resume()`\n\n**File**: `lantu/memory/session.py:397-434`\n\n```python\njournal = SessionJournal(self._sessions_dir, session_id)\nevents = journal.read()                                   # :404  full append-only replay\n_append_interruption_events(journal, events, runtime_id)  # :405  mark interrupted runtimes/turns/tools\nevents = journal.read()                                   # :406  re-read after appending\nprojected = _project_messages(events)                     # :407  → rebuild Conversation messages\n```\n\nThen each sub-state is replayed and injected into a fresh `Session` (`:412-424`):\n- `loaded_tool_states=_tool_schema_states(events)` (`:417`)\n- `file_ledger=_file_ledger_from_events(events)` (`:418`)\n- `schema_epoch=_schema_epoch_from_events(events)` (`:419`)\n- `active_window_id=_active_window_from_events(events)` (`:420-423`)\n\n`session._register_projected_messages(projected)` (`:425`) rebuilds the `id(message) → message_id` index. Returns `ResumeResult(session, messages=[...], last_active)` (`:427-431`).\n\n### 2. Conversation rebuild — `_project_messages()`\n\n**File**: `lantu/memory/session.py:630-702`\n\nIterates events in order, applying each as an **overwrite-style projection**:\n\n- `message.created` (`:634-640`) → `_message_from_payload()` reconstructs a `Message`; appended to running `projected` list\n- `context.compacted` (`:641-661`) → **replaces** `projected` with a `summary_{event_id}` user message + the `kept_message_ids` pulled from the accumulated `messages` dict\n- `context.window.rolled_over` (`:662-687`) → **replaces** `projected` with a `window_{event_id}` handoff message (summary + artifact index) + kept messages\n- `context.tool_results_compacted` (`:688-701`) → **mutates in place** the tool_result content of projected messages (reduced preview references)\n\nOrdering matters: later compact/rollover events supersede earlier message lists, so the reconstructed Conversation reflects the **final window projection**, not the full transcript.\n\n### 3. FileLedger rebuild — `_file_ledger_from_events()`\n\n**File**: `lantu/memory/session.py:761-768`\n\n```python\nledger = FileLedger()\nfor event in events:\n    if event.type not in {\"file.observed\", \"file.updated\"}:\n        continue\n    ledger.apply_payload(event.payload)   # :767\nreturn ledger\n```\n\nReplays only file-observation/update events in order; `FileLedger.apply_payload()` (`lantu/memory/file_ledger.py:147-151`) calls `apply()`, which stores the **latest entry per path** (`_entries[path] = entry`, `:137`) and re-creates `FileReadObservation`s for read operations (`:138-145`). Last-writer-wins gives the final on-disk-known state. Note `_visible_ranges` is *not* persisted — it resets empty on resume.\n\n### 4. Other replays (same resume call)\n\n- `_tool_schema_states()` (`session.py:740-759`) — replays `tool.schema.loaded` in order for deferred-tool activation state\n- `_schema_epoch_from_events()` (`session.py:771-777`) — last `tool.schema.epoch.changed` payload\n- `_active_window_from_events()` (`session.py:780+`) — last `session.created`/rollover `window_id`\n- `_meta_from_events()` (`session.py:705-737`) — rebuilds `SessionMeta` (title, summary, token totals) from the event stream\n- `_append_interruption_events()` (`session.py:794+`) — tracks `runtime.started/stopped`, `turn.*`, `tool.*`, `model.request.*` to append synthetic `runtime.interrupted` / `turn.interrupted` closure events so resume sees a clean boundary\n\n### Path summary\n\n```\nSessionManager.resume(session_id)                session.py:397\n  ├─ journal.read()                              → full NDJSON event list\n  ├─ _append_interruption_events()               session.py:794  (close interrupted runtimes/turns)\n  ├─ _project_messages(events)                   session.py:630  → Conversation messages\n  ├─ _tool_schema_states(events)                 session.py:740  → tool activation state\n  ├─ _file_ledger_from_events(events)            session.py:761  → FileLedger (latest per path)\n  ├─ _schema_epoch_from_events(events)           session.py:771  → schema epoch\n  ├─ _active_window_from_events(events)          session.py:780  → window_id\n  ├─ _meta_from_events(events)                   session.py:705  → SessionMeta\n  ├─ Session(...)                                session.py:412\n  └─ session._register_projected_messages()      session.py:345  → message id index\n```",
+            "errors": []
+          },
+          {
+            "task": 8,
+            "prompt": "Trace the complete CodeSearch fallback chain when zvec semantic or exact MCP search fails, down to native rg and Python Grep.",
+            "expected_paths": [
+              "lantu/tools/code_search.py",
+              "lantu/tools/grep.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 17.828,
+            "tool_calls": [
+              "ReadFile"
+            ],
+            "answer": "I'll read the CodeSearch tool implementation to trace its full fallback chain.\n\nI have the full implementation. Here's the trace:\n\n---\n\n## CodeSearch fallback chain\n\nAll in **`lantu/tools/code_search.py`**. Entry point is `execute()` (`:52-62`):\n\n```\nmode == \"semantic\" (or auto + looks_semantic)  → _semantic()\notherwise                                      → _exact()\n```\n\n### Semantic path — `_semantic()` (`code_search.py:69-94`)\n\n1. **zvec semantic MCP** — `self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", args)` (`:82-84`). On success returns `backend=\"zvec_grep_search\"` (`:87-90`)\n2. **Fall 1**: MCP manager is `None` (`:70-73`) → **`_fallback_exact()`** with `semantic_fallback=True`\n3. **Fall 2**: MCP call raises or returns `isError` (`:91-94`) → **`_fallback_exact()`** with `semantic_error` recorded\n\n### `_fallback_exact()` — the shared collapse point (`code_search.py:96-113`)\n\nUsed by both semantic (on zvec search failure) and exact paths:\n\n1. **`_local_rg()`** (`:98-102`) → try native `rg`\n2. If rg unavailable → **`self._grep.execute(GrepParams(...))`** = built-in Python `Grep`, with `backend=\"python_grep\"` (`:104-113`)\n\n### Exact path — `_exact()` (`code_search.py:115-137`)\n\n1. **zvec exact MCP** — `call_tool(\"zvec_grep\", \"zvec_grep_rg\", args)` with `command=self._rg_command(params)` (`:123-125`, cmd built at `:139-144`). On success → `backend=\"zvec_grep_rg\"` (`:126-130`)\n2. On `isError` / exception → **`_fallback_exact()`** (`:135-137`), dropping the `semantic_fallback` tag\n\n### `_local_rg()` — native rg (`code_search.py:146-174`)\n\n- `shutil.which(\"rg\")` missing → `None` (`:147-149`)\n- Runs `rg -n --no-heading --color never` via `asyncio.to_thread` subprocess (`:155-169`)\n- `code == 0` → match output, `backend=\"rg\"` (`:171`)\n- `code == 1` → `\"No matches found.\"`, `backend=\"rg\"` (`:172-173`)\n- any other code → `None`, dropping through to Python Grep (`:174`)\n\n### Python Grep — final fallback\n\n`self._grep` (a `Grep` instance, injected in `__init__` `:43-46`) executes `GrepParams(pattern, path, include)` (`:104-107`). This is the terminal backend — no further fallback.\n\n### Full chain diagram\n\n```\nexecute()                                          code_search.py:52\n ├─ semantic (or auto+NL) → _semantic()            :69\n │    ├─ zvec_grep_search (MCP)                    :82   backend=zvec_grep_search (degraded=false)\n │    └─ on fail/None → _fallback_exact()          :92/71\n │         ├─ _local_rg()  native rg               :98   backend=rg (degraded=true)\n │         │    └─ missing/fail → Grep (Python)    :104  backend=python_grep (degraded=true)\n └─ exact → _exact()                               :115\n      ├─ zvec_grep_rg (MCP)                        :123  backend=zvec_grep_rg (degraded=false)\n      └─ on fail/None → _fallback_exact()          :135\n           ├─ _local_rg()  native rg               :98\n           └─ Grep (Python)                        :104\n```\n\nBackend quality degrades monotonically: **zvec MCP → native rg → Python Grep**, with `degraded` and `backend` metadata flags recording which hop served the result.",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "variant": "optimized_zg_2",
+        "model": "deepseek-v4-flash",
+        "tasks_passed": 7,
+        "tasks_total": 8,
+        "elapsed_seconds": 267.015,
+        "tool_calls": {
+          "CodeSearch": 35,
+          "ReadFile": 55,
+          "Bash": 2
+        },
+        "total_tool_calls": 92,
+        "read_file_calls": 55,
+        "input_tokens": 128873,
+        "cache_read_tokens": 1747968,
+        "output_tokens": 17875,
+        "errors": [],
+        "tasks": [
+          {
+            "task": 1,
+            "prompt": "Trace the complete path from YAML provider configuration loading to the final OpenAI-compatible chat completion request. Name the key functions and files.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/client.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 26.121,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch"
+            ],
+            "answer": "## 完整路径\n\n| 阶段 | 文件 | 函数 | 关键动作 |\n|------|------|------|----------|\n| **1. Config 加载** | `lantu/config.py:278` | `load_config()` | 扫描 `~/.lantu/config.yaml` → `cwd/.lantu/config.yaml` → `cwd/.lantu/config.local.yaml`，逐层合并 |\n| **2. YAML 解析** | `lantu/config.py:168` | `_load_single_file()` | `yaml.safe_load()` 反序列化，经 `validate_config_structure()` 校验，构造 `ProviderConfig` 对象列表 |\n| **3. Runtime 构建** | `lantu/runtime/builder.py:87` | `_build_core()` | 调用 `create_client(provider)` |\n| **4. Client 派发** | `lantu/client.py:740` | `create_client()` | 根据 `config.protocol == \"openai-compat\"` 分支，返回 `OpenAICompatClient(config)` |\n| **5. Client 初始化** | `lantu/client.py:561` | `OpenAICompatClient.__init__()` | 提取 `model`、`max_output_tokens`、`reasoning_effort`，用 `base_url` + `api_key` 构造 `AsyncOpenAI` 实例 |\n| **6. 消息序列化** | `lantu/serialization.py:99` | `build_chat_completion_messages()` | 将内部 `Message` 格式转为 `[{role, content, tool_calls, reasoning_content}]` |\n| **7. 请求构建** | `lantu/client.py:618` | `OpenAICompatClient.stream()` | 组装 `kwargs`：`model`、`messages`、`max_tokens`、`tools`（经 `_convert_tools` 重嵌套）、`reasoning_effort`（塞入 `extra_body`） |\n| **8. 请求发送** | `lantu/client.py:642` | `self._client.chat.completions.create(**kwargs)` | 通过 `openai` SDK 发送 `POST /chat/completions`，streaming 模式带 `include_usage` |\n| **9. 审计日志** | `lantu/client.py:80` | `_record_prepared_request()` | 将 `kwargs` 写入 NDJSON 审计日志（`_record_prepared_request` → `audit_logger`） |\n| **10. 请求头** | `lantu/client.py:68` | `_model_call_headers()` | 注入 `X-Lantu-*` 标记头，用于 provider 链路追踪 |\n\n**一句话总结**：`load_config()` → `_load_single_file()` 产出 `ProviderConfig` → `_build_core()` 调用 `create_client()` 派发到 `OpenAICompatClient` → `stream()` 方法用 `build_chat_completion_messages()` 序列化消息，拼装 kwargs，最终调用 `AsyncOpenAI().chat.completions.create()` 发出请求。",
+            "errors": []
+          },
+          {
+            "task": 2,
+            "prompt": "Trace how MCP server configuration becomes a connected manager and is injected into CodeSearch at runtime.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/runtime/lifecycle.py",
+              "lantu/tools/code_search.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 25.357,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "## 完整路径\n\n| 阶段 | 文件 | 函数 | 关键动作 |\n|------|------|------|----------|\n| **1. Config 解析** | `lantu/config.py:191-200` | `_load_single_file()` | 从 YAML 的 `mcp_servers` 段解析出 `list[MCPServerConfig]`，存入 `AppConfig.mcp_servers` |\n| **2. Config 合并** | `lantu/config.py:248-254` | `_merge_config()` | 多文件配置按 name 同名校覆盖合并 |\n| **3. 启动分发** | `lantu/__main__.py:346` | `_main()` | 将 `config.mcp_servers` 传给 `RemoteServer` 或 `build_interactive_runtime` |\n| **4. 服务启动** | `lantu/runtime/builder.py:355-356` | `_start_runtime_services()` | 若 `runtime.config.mcp_servers` 非空，创建 `asyncio.create_task(initialize_runtime_mcp(runtime))` |\n| **5. Manager 初始化** | `lantu/runtime/lifecycle.py:220-223` | `initialize_runtime_mcp()` | 创建 `MCPManager()`，调用 `manager.load_configs(runtime.config.mcp_servers)` 装载配置 |\n| **6. 连接+注册** | `lantu/mcp/manager.py:87-97` → `44-76` | `register_all_tools()` → `connect_all()` | 遍历每台 server，创建 `MCPClient(config)`，`client.connect()`，`client.list_tools()`，包装为 `MCPToolWrapper`，`registry.register(tool)` |\n| **7. 注入 CodeSearch** | `lantu/runtime/lifecycle.py:228-230` | `initialize_runtime_mcp()` | `registry.get(\"CodeSearch\").set_mcp_manager(manager)` — 将整个 `MCPManager` 实例注入 `CodeSearch._mcp_manager` |\n| **8. 禁掉重复工具** | `lantu/runtime/lifecycle.py:233-235` | 同上 | 所有 `mcp_zvec_grep_*` 工具从 `registry` 中 disable，防止模型直接调用（由 CodeSearch 内部路由） |\n| **9. CodeSearch 使用** | `lantu/tools/code_search.py:69-84` | `_semantic()` | 语义搜索时通过 `self._mcp_manager.call_tool(\"zvec_grep_search\", ...)` 走 MCP 通道 |\n\n**关键链路**：`MCPServerConfig` → `MCPManager.load_configs()` → `connect_all()` → `MCPClient.connect()` → `register_all_tools()` 注册到 `ToolRegistry` → `set_mcp_manager(manager)` 注入 `CodeSearch` 实例，供其 `_semantic()` 方法通过 `_mcp_manager.call_tool()` 调用 `zvec_grep_search`。",
+            "errors": []
+          },
+          {
+            "task": 3,
+            "prompt": "Explain how FileLedger state changes after ReadFile, after EditFile, and after a Session resume. Cite the implementation files.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/file_ledger.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 27.143,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch"
+            ],
+            "answer": "## FileLedger 状态变化\n\n### 1. ReadFile 之后\n\n**记录观察**：`agent.py:1341-1394` `_record_file_ledger_event()`\n\n- 读取文件，计算 `sha256`、`size`、`line_count`，`operation=\"read\"`，保留 `offset`/`limit`\n- `ledger.apply(entry)` → `_entries[path]` 覆盖为该最新 entry；若 `entry.tool_call_id` 存在且 `operation==\"read\"`，同时写入 `_observations[tool_call_id]`\n- 写入 journal 事件 `file.observed`\n\n**标记可见范围**：`agent.py:1317-1338`\n\n- `prepare_tool_results_with_metadata` 返回 `visible_line_ranges`，据其调用 `ledger.mark_visible(path, content_hash, range_start, range_end)` 存储到 `_visible_ranges`\n- 后续同路径同 hash 同范围的 ReadFile 结果会被 `agent.py:1278` 的 `is_visible()` 检查命中，替换为 dedup 占位消息\n\n### 2. EditFile 之后\n\n**记录更新**：`agent.py:1341-1394` `_record_file_ledger_event()`\n\n- 同样读取文件写入新 entry，`operation=\"edit\"`，`offset=0`，`limit=None`\n- **关键区别**：`agent.py:1380-1381` — `if operation != \"read\": ledger.invalidate(path)` → 清除该路径在 `_visible_ranges` 中的所有条目（旧版本可见性失效）\n- `ledger.apply(entry)` 覆盖 `_entries[path]`\n- 写入 journal 事件 `file.updated`\n\n### 3. Session Resume 之后\n\n**重建台账**：`session.py:761-768` `_file_ledger_from_events()`\n\n- 遍历 `journal.read()` 所有事件，只取 `type in {\"file.observed\", \"file.updated\"}`，按事件顺序对每个 payload 调用 `ledger.apply_payload()` 逐条回放\n- **结果**：`_entries` 恢复为每个路径的最新 entry（后一个同路径事件覆盖前一个）；`_observations` 恢复所有历史 read 观察\n- `_visible_ranges` **不持久化**（`file_ledger.py:98` — \"Visible ranges are only a projection of the current conversation and can be cleared on compact\"），resume 后为空\n\n### 核心文件\n\n| 文件 | 职责 |\n|------|------|\n| `lantu/memory/file_ledger.py` | `FileLedger` 类定义，含 `apply()`、`mark_visible()`、`invalidate()`、`is_visible()` |\n| `lantu/agent.py:1341-1394` | `_record_file_ledger_event()` — 每次 ReadFile/EditFile/WriteFile 执行后调用 |\n| `lantu/agent.py:1271-1339` | dedup 逻辑 + visible range 标记 |\n| `lantu/memory/session.py:761-768` | `_file_ledger_from_events()` — Session resume 时从 journal 重放重建 |",
+            "errors": []
+          },
+          {
+            "task": 4,
+            "prompt": "Trace the decision path from context pressure measurement through stale tool cleanup and structured compaction to window rollover.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 61.343,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch"
+            ],
+            "answer": "## 决策路径\n\n### 1. 入口 — Agent 循环\n**`lantu/agent.py:624`** `Agent._run_core` 每轮迭代调用 `auto_compact(...)`，传入 `at_user_boundary=iteration == 1`。\n\n### 2. 压力测量 — 只读诊断\n**`lantu/context/manager.py:1152-1157`** `auto_compact()` 开头：\n- `conversation.current_tokens()` 以真实 API 用量为锚点取当前 token 数\n- 调用 `analyze_context_pressure()` (`manager.py:1000-1069`)，产出 `ContextPressureReport`：\n  - `pressure_level`：`none`/`soft`/`hard`（按 `compute_compact_threshold` 软 13K / 硬 3K 分界，`manager.py:1030-1035`）\n  - `stale_tool_tokens`、`old_conversation_tokens`、`existing_summary_tokens` 三类来源分解\n  - `recommended_action` 初判（`manager.py:1046-1055`）\n\n### 3. 双阈值门控 + 熔断器\n**`lantu/context/manager.py:1162-1178`**：\n- 低于软阈值 → `return None`（不压缩）\n- 超过硬阈值 → 强制压缩、绕过熔断器\n- 软硬之间 → 检查 `CompactCircuitBreaker`，熔断则中止\n\n### 4. 策略裁决 — 纯函数\n**`lantu/context/manager.py:128-159`** `CompactionPolicy.decide()` 把 report 映射为最终动作：\n- `none` → NONE；非用户边界 → DEFER\n- `hard` 且已有 `existing_summary_tokens > 0` → **WINDOW_ROLLOVER**\n- `recommended_action==compact_stale_tools` → **COMPACT_STALE_TOOLS**\n- `soft` 且缓存健康 → DEFER\n- 否则 → **STRUCTURED_SUMMARY**\n\n`auto_compact` 对 NONE/DEFER 直接返回（`manager.py:1185-1189`）。\n\n### 5. 陈旧工具清理\n**`lantu/context/manager.py:1191-1220`** 当动作为 `COMPACT_STALE_TOOLS`：\n- 调用 `compact_stale_tool_results()` (`manager.py:162`)：只处理 `keep_start` 之前的消息，把旧工具预览缩减为持久化引用，超出 `TOOL_RESULT_INLINE_CHAR_LIMIT` 的先落盘再缩减\n- 通过 `conversation.replace_history_preserving_runtime()` 就地替换，返回 `CompactEvent`，**不进入摘要流程**\n\n### 6. 结构化压缩\n**`lantu/context/manager.py:1232-1330`** 当动作为 `STRUCTURED_SUMMARY`（或 `WINDOW_ROLLOVER`）：\n- `_compute_keep_start_index()` 决定保留尾部；前缀太小则退化不压缩（`manager.py:1238-1239`）\n- 以 `COMPACTION_INSTRUCTION` 触发 LLM 摘要（`manager.py:1246-1301`），`extract_summary()` 抽取\n- 重试/降载处理（`manager.py:1253-1294`）：prompt 过长则按 turn 分组丢弃 1/5 再试\n- `conversation.replace_history(new_messages)` 重建历史并 `reset_appendix_baseline()`（`manager.py:1330-1334`）\n\n### 7. 窗口切换\n**`lantu/context/manager.py:1305-1313`** 当 `policy_action == WINDOW_ROLLOVER`（非手动）：\n- `_compute_rollover_keep_tail()` + `build_window_rollover_messages()` 构造新窗口首条交接消息（含 `artifact_refs`，不含 tool attachment）\n- 否则走 `build_compact_messages()`（附带 recovery attachment）\n\n**持久化**：返回的 `CompactEvent`（含 `CompactBoundary{summary, keep, artifact_refs}`）由调用方落库 —— `session.context_window_rolled_over()`（**`lantu/memory/session.py:241-287`**）追加 `context.window.rolled_over` journal 事件，记录 `window_id`、`parent_window_id`、`archived_until_sequence`、`kept_message_ids`、`file_ledger_sequence` 并更新决策路径已在上一轮完整给出。核心链路（按文件、行号）：\n\n1. **入口** `lantu/agent.py:624` `auto_compact()`\n2. **压力测量** `lantu/context/manager.py:1152-1157` → `analyze_context_pressure()` (`:1000-1069`)\n3. **双阈值+熔断** `lantu/context/manager.py:1162-1178`\n4. **策略裁决** `CompactionPolicy.decide()` (`:128-159`)\n5. **陈旧工具清理** `compact_stale_tool_results()` (`:1191-1220`, 实现 `:162`)\n6. **结构化压缩** `:1232-1330`\n7. **窗口切换** `build_window_rollover_messages()` (`:1305-1313`) + `session.context_window_rolled_over()` (`lantu/memory/session.py:241-287`)\n\n需要我继续展开第 7 步之后调用方如何消费 `CompactEvent`（`__main__.py:579` / `remote.py:509` / `ui/inline/app.py:404`）吗？",
+            "errors": []
+          },
+          {
+            "task": 5,
+            "prompt": "Explain how an oversized tool result is persisted, previewed in Conversation, and later made recoverable. Cite the relevant functions.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 41.651,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "## 完整生命周期\n\n### 1. 首落盘 — 每条结果边界检查\n**`lantu/context/manager.py:468-480`** `prepare_tool_results_with_metadata()`：\n- 非 ReadFile 结果且长度 > `TOOL_RESULT_INLINE_CHAR_LIMIT` **(8K)** → `persist_tool_result()` 写入 `{session_dir}/{tool_use_id}.txt`，然后 `make_persisted_preview()` 替换为 `{PERSISTED_TAG} + 头4K+尾1K预览 + 保存路径`\n\n### 2. 聚合压缩 — 整轮结果集超限\n**`lantu/context/manager.py:489-559`** 同一函数第二段：\n- 若全部结果总和 > `AGGREGATE_CHAR_LIMIT` **(64K)**，按大小排序逐个将已 inline 的结果落盘+预览替换\n- 若预览后仍超限，进一步将预览降级为纯引用 `make_persisted_reference()`（仅路径，无预览内容）\n\n### 3. 陈旧清理 — 跨轮压缩\n**`lantu/context/manager.py:190-197`** `compact_stale_tool_results()`：\n- 只处理 `keep_start` 之前的旧消息，检测 `PERSISTED_TAG` 命中→跳过，否则对超过阈值的大结果落盘+替换为引用\n\n### 4. 恢复 — 两种机制\n\n**a) RecoveryState 快照（压缩后重新附加）**\n- `lantu/agent.py:1247-1264` `_snapshot_for_recovery()`：每次 ReadFile 调用后，把文件内容快照到 `RecoveryState._files`\n- `lantu/context/manager.py:1315` `auto_compact()` 调用 `build_recovery_attachment()` → 将最近读过的文件内容（按 token budget 截断）附加到摘要 user 消息的末尾\n\n**b) Artifact 索引（窗口切换后恢复）**\n- `lantu/context/manager.py:1302` `auto_compact()` 调用 `_persisted_artifact_refs()` 收集所有 `<persisted-output>` 中的路径\n- `lantu/memory/session.py:258-276` `context_window_rolled_over()` 将这些路径写入 `context.window.rolled_over` journal 事件的 `artifact_refs` 字段\n- 模型通过摘要中的提示（\"请用 ReadFile 读取完整会话记录\"）自行重新读取文件\n\n**c) Session Resume 重建**\n- `lantu/memory/session.py:664-678` `_project_messages()`：恢复时从 `context.compacted` 或 `context.window.rolled_over` 事件中取出 `artifact_refs` 列表，附在重建的消息中引导模型去 ReadFile 找回完整内容",
+            "errors": []
+          },
+          {
+            "task": 6,
+            "prompt": "Trace how a tool schema view is recorded as a Schema Epoch and how that state is persisted for later requests or resume.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 41.05,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "Bash",
+              "Bash"
+            ],
+            "answer": "## 完整路径\n\n### 1. 创建 — `ToolRegistry.schema_epoch()`\n\n**`lantu/tools/__init__.py:279-301`**：每次调用时计算当前协议下所有可见 tool schema 的 `fingerprint`（对 `{protocol, loading_mode, schemas[name, schema_hash], deferred_tools}` 整体 JSON-hash），产出 `SchemaEpoch {epoch_id: \"schema-{fingerprint[:16]}\", ...}`。相同的 schema 视图必定产生相同的 epoch_id。\n\n### 2. 差异检测与持久化 — `Agent._sync_schema_epoch()`\n\n**`lantu/agent.py:1122-1148`**：在每次 LLM 请求前调用（`agent.py:661`）：\n\n- 取 `registry.schema_epoch(protocol)` 与 `self._schema_epoch_id` 比较\n- 若相同 → **直接返回**，跳过记录\n- 若不同 → 构造 payload（含 `epoch_id`、`reason` 枚举：`initial` / `mode_changed` / `tool_loaded` / `schema_changed`、`previous_epoch_id`）\n- 调用 `self.session.record(ExecutionEvent(\"tool.schema.epoch.changed\", payload))` → **`lantu/memory/session.py:194-201`** 追加 NDJSON journal 事件，同时原地更新 `self.schema_epoch = dict(event.payload)`\n\n### 3. 请求时携带 — `Agent._run_core()`\n\n**`lantu/agent.py:662-668`**：生成 LLM 流时传入 `schema_epoch_id=self._schema_epoch_id`，由 `LensRequestRecorder.stream()`（`lantu/tools/lens/request_trace.py:57-58`）写入请求追踪元数据。\n\n### 4. 窗口切换时 — 跨窗口携带\n\n**`lantu/memory/session.py:278`** `context_window_rolled_over()` 将当前 `self.schema_epoch` 写入 `context.window.rolled_over` 事件的 payload：\n\n```python\n\"schema_epoch\": dict(self.schema_epoch) if self.schema_epoch else None\n```\n\n同一个 Session 内的不同窗口共享最新的 epoch 快照。\n\n### 5. Resume 恢复 — `_schema_epoch_from_events()`\n\n**`lantu/memory/session.py:771-777`**：遍历 journal 全部事件，取最后一个 `tool.schema.epoch.changed` 的 payload：\n\n```python\nfor event in events:\n    if event.type == \"tool.schema.epoch.changed\":\n        latest = dict(event.payload)\nreturn latest\n```\n\n该 payload 传入 `Session.__init__(schema_epoch=...)`（`session.py:113,125`）恢复为 `self.schema_epoch`，`Agent.__init__()`（`agent.py:345-350`）从中提取 `epoch_id` 赋给 `self._schema_epoch_id`，完成恢复。\n\n### 关键文件一览\n\n| 文件 | 行号 | 职责 |\n|------|------|------|\n| `lantu/tools/__init__.py` | 16-34 | `SchemaEpoch` 数据类 + `to_payload()` |\n| `lantu/tools/__init__.py` | 279-301 | `ToolRegistry.schema_epoch()` 计算指纹和 epoch_id |\n| `lantu/agent.py` | 1122-1148 | `_sync_schema_epoch()` 差异检测 + journal 落盘 |\n| `lantu/memory/session.py` | 194-201 | journal append + 原地更新 `self.schema_epoch` |\n| `lantu/memory/session.py` | 278 | 窗口切换时携带 epoch |\n| `lantu/memory/session.py` | 771-777 | `_schema_epoch_from_events()` resume 时回放 |\n| `lantu/agent.py` | 345-350 | resume 后从 session 恢复 `_schema_epoch_id` |",
+            "errors": []
+          },
+          {
+            "task": 7,
+            "prompt": "Trace how Session Journal events rebuild Conversation and FileLedger during resume, including the functions that replay events.",
+            "expected_paths": [
+              "lantu/memory/session.py",
+              "lantu/memory/file_ledger.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 32.971,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "## Resume 完整重放路径\n\n### 入口 — `SessionManager.resume()`\n\n**`lantu/memory/session.py:397-434`**：\n\n1. 构造 `SessionJournal(sessions_dir, session_id)` — **`lantu/memory/journal.py:100-126`** 打开 `{session_id}.jsonl` 文件，获取写锁，读取完整事件列表，修正截断\n2. `journal.read()` — **`journal.py:163-164`** 读取全量事件为 `list[JournalEvent]`\n3. 调用 `_project_messages(events)` 重建 Conversation\n4. 调用 `_file_ledger_from_events(events)` 重建 FileLedger\n5. 调用 `_schema_epoch_from_events(events)` 恢复 SchemaEpoch\n6. 构造 `Session(journal, meta, ..., file_ledger=..., schema_epoch=...)`\n7. 调用 `session._register_projected_messages(projected)` 注册消息ID映射\n\n### Conversation 重建 — `_project_messages()`\n\n**`lantu/memory/session.py:630-702`** 按事件顺序顺序追加或替换：\n\n| 事件类型 | 动作 |\n|----------|------|\n| `message.created` | 追加 `(message_id, Message)` 到投影列表 |\n| `context.compacted` | 用摘要 user 消息 + 原始尾部消息替换整个投影列表 |\n| `context.window.rolled_over` | 用交接摘要 + artifact refs + 原始尾部消息替换整个投影列表 |\n| `context.tool_results_compacted` | 遍历当前投影列表，按 `tool_use_id` 替换对应 `result.content` |\n\n最后注册 `session._register_projected_messages(projected)`（`session.py:345-347`）建立 `id(message) → message_id` 映射供后续事件引用。\n\n### FileLedger 重建 — `_file_ledger_from_events()`\n\n**`lantu/memory/session.py:761-768`**：\n\n```python\nledger = FileLedger()\nfor event in events:\n    if event.type in {\"file.observed\", \"file.updated\"}:\n        ledger.apply_payload(event.payload)\n```\n\n按事件顺序回放，后发生的同路径事件覆盖前者。`_observations` 恢复所有历史 read 记录；`_visible_ranges` **不恢复**（仅当前对话的运行时投影）。\n\n### SchemaEpoch 重建 — `_schema_epoch_from_events()`\n\n**`lantu/memory/session.py:771-777`**：取最后一个 `tool.schema.epoch.changed` 事件的 payload。\n\n### 关键文件\n\n| 文件 | 行号 | 职责 |\n|------|------|------|\n| `lantu/memory/session.py` | 397-434 | `SessionManager.resume()` 编排入口 |\n| `lantu/memory/session.py` | 630-702 | `_project_messages()` 按事件类型重建 Message 列表 |\n| `lantu/memory/session.py` | 761-768 | `_file_ledger_from_events()` 重放文件观察/更新 |\n| `lantu/memory/session.py` | 771-777 | `_schema_epoch_from_events()` 恢复最新 schema epoch |\n| `lantu/memory/journal.py` | 97-176 | `SessionJournal` 文件锁、追加、读取（`read()`→`read_file()`） |",
+            "errors": []
+          },
+          {
+            "task": 8,
+            "prompt": "Trace the complete CodeSearch fallback chain when zvec semantic or exact MCP search fails, down to native rg and Python Grep.",
+            "expected_paths": [
+              "lantu/tools/code_search.py",
+              "lantu/tools/grep.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 11.379,
+            "tool_calls": [
+              "ReadFile"
+            ],
+            "answer": "## CodeSearch 回退链完整追踪\n\n**文件：`lantu/tools/code_search.py`**\n\n### 入口 — `execute()` (line 52-62)\n根据 `mode` 分派：`semantic` 或 `auto` 且 query 像自然语言（`_looks_semantic`，≥4词或含`?？`）→ `_semantic()`；否则 → `_exact()`。\n\n### 语义路径 — `_semantic()` (line 69-94)\n```\nMCP zvec_grep_search ──失败/异常──> _fallback_exact()\n```\n1. `_mcp_manager is None`（未注入）→ 直接 `_fallback_exact()`\n2. 否则 `call_tool(\"zvec_grep\", \"zvec_grep_search\")`，成功返回 `backend=zvec_grep_search`\n3. `isError` 或抛异常 → `_fallback_exact()`，记录 `semantic_error`\n\n### 精确路径 — `_exact()` (line 115-137)\n```\nMCP zvec_grep_rg ──失败/异常──> _fallback_exact()\n```\n1. `_mcp_manager is None` → 直接 `_fallback_exact()`\n2. 否则通过 `_rg_command()` (line 139-144) 构造 `rg -n [-g glob] query path` 传给 `call_tool(\"zvec_grep\", \"zvec_grep_rg\")`，成功返回 `backend=zvec_grep_rg`\n3. 失败 → `_fallback_exact()`\n\n### 本地回退 — `_fallback_exact()` (line 96-113)\n```\n_fallback_exact ──rg 可用──> _local_rg()（本地原生 rg）\n                └─rg 不可用/失败──> self._grep.execute()（内置 Python Grep）\n```\n1. 调用 `_local_rg()` (line 146-174)\n2. 成功（`_local_rg` 非 None）→ 返回 `backend=rg, degraded=True`\n3. 否则 → 调用 `self._grep.execute(GrepParams(...))` — **`lantu/tools/grep.py` 的 `Grep` 工具**（Python 原生实现），返回 `backend=python_grep, degraded=True`\n\n### 回退链全景\n| 层级 | 后端 | 位置 | 触发条件 |\n|------|------|------|----------|\n| 1 | `zvec_grep_search` (语义) / `zvec_grep_rg` (精确) | MCP server via `_mcp_manager.call_tool` | MCP 注入且成功 |\n| 2 | 本地 `rg` 二进制 | `_local_rg()` via `subprocess` | MCP 失败 + `shutil.which(\"rg\")` 存在 |\n| 3 | Python `Grep` | `self._grep.execute()` | 本地 rg 不可用或非零退出码 |\n\n每个 fallback 层级都在 `meta` 中标记 `degraded=True`（+ `semantic_fallback`）供上层观测。",
+            "errors": []
+          }
+        ]
+      },
+      {
+        "variant": "optimized_zg_3",
+        "model": "deepseek-v4-flash",
+        "tasks_passed": 7,
+        "tasks_total": 8,
+        "elapsed_seconds": 273.844,
+        "tool_calls": {
+          "memory_search": 2,
+          "CodeSearch": 39,
+          "ReadFile": 49
+        },
+        "total_tool_calls": 90,
+        "read_file_calls": 49,
+        "input_tokens": 152436,
+        "cache_read_tokens": 2036736,
+        "output_tokens": 20353,
+        "errors": [],
+        "tasks": [
+          {
+            "task": 1,
+            "prompt": "Trace the complete path from YAML provider configuration loading to the final OpenAI-compatible chat completion request. Name the key functions and files.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/client.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 43.243,
+            "tool_calls": [
+              "memory_search",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "Let me read the memory file and trace the client construction to the final request.\n\nNow let me trace `create_client` through to the chat completion request.\n\nComplete trace from YAML config to the OpenAI-compatible chat completion request:\n\n**1. Config load & parse — `lantu/config.py`**\n- `load_config(path)` at `config.py:278`: probes candidates in priority order `~/.lantu/config.yaml` → project `.lantu/config.yaml` → `.lantu/config.local.yaml`, merging via `_merge_config`.\n- `_load_single_file()` at `config.py:168`: `yaml.safe_load()` parses the YAML → dict, `validate_config_structure()` validates, then builds `ProviderConfig` dataclasses (`config.py:31`) wrapped in `AppConfig`.\n\n**2. CLI entry point — `lantu/__main__.py`**\n- `_run_prompt` at `__main__.py:371` selects `config.providers[0]` and calls `create_client(provider)` at line 392. (Interactive mode goes through `lantu/runtime/builder.py:87` `_build_core`, same call.)\n\n**3. Client factory — `lantu/client.py:740`**\n- `create_client(config: ProviderConfig)`: dispatches on `config.protocol`; for `\"openai-compat\"` returns `OpenAICompatClient(config)`.\n\n**4. Client construction — `lantu/client.py:552` `OpenAICompatClient.__init__`**\n- `config.resolve_api_key()` (`config.py:48`) resolves `${ENV}` placeholders / `OPENAI_API_KEY`; builds `AsyncOpenAI(api_key=..., base_url=config.base_url)` at line 572.\n\n**5. Request assembly — `OpenAICompatClient.stream()` at `client.py:604`**\n- `build_chat_completion_messages()` (`lantu/serialization.py:99`) converts `ConversationManager` messages to Chat Completions format.\n- `kwargs` built at `client.py:618` (model, messages, max_tokens, stream, tools via `_convert_tools`, reasoning_effort as `extra_body`).\n- `_record_prepared_request(kwargs)` at line 633 for Lens instrumentation.\n\n**6. Final HTTP call — `lantu/client.py:642`**\n- `self._client.chat.completions.create(**kwargs)` — the actual OpenAI-compatible Chat Completions request.\n\nKey files: `lantu/config.py`, `lantu/client.py`, `lantu/serialization.py`, `lantu/__main__.py`, `lantu/runtime/builder.py`.",
+            "errors": []
+          },
+          {
+            "task": 2,
+            "prompt": "Trace how MCP server configuration becomes a connected manager and is injected into CodeSearch at runtime.",
+            "expected_paths": [
+              "lantu/config.py",
+              "lantu/runtime/lifecycle.py",
+              "lantu/tools/code_search.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 15.535,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "完整路径如下：\n\n**1. 配置解析 — `lantu/config.py`**\n- `_load_single_file()` 的第 191-201 行 将 `validated[\"mcp_servers\"]` 映射为 `MCPServerConfig` 结构体列表，存储在 `AppConfig.mcp_servers` 中。\n\n**2. 启动时触发 — `lantu/runtime/builder.py:355`**\n- `_start_runtime_services()` 检查 `runtime.config.mcp_servers`，若不为空，则创建 `asyncio.create_task(initialize_runtime_mcp(runtime))`。\n\n**3. 管理器初始化 — `lantu/runtime/lifecycle.py:219`**\n- `initialize_runtime_mcp()`：创建 `MCPManager()`，调用 `manager.load_configs(runtime.config.mcp_servers)`（第 223 行），将 `MCPServerConfig` 列表存入 `self._configs`。\n\n**4. 连接与注册 — `lantu/mcp/manager.py:87`**\n- `register_all_tools()`（第 87 行）→ `connect_all()`（第 44 行）：迭代每个配置，创建 `MCPClient(config)`，连接，列出工具，包装为 `MCPToolWrapper`，注册到 `ToolRegistry`。\n\n**5. 注入 CodeSearch — `lantu/runtime/lifecycle.py:228-230`**\n- 从注册表中获取 `CodeSearch` 工具，调用 `code_search.set_mcp_manager(manager)`，将 MCP 管理器句柄注入 `CodeSearch._mcp_manager`（`code_search.py:49`）。\n\n**6. 运行时路由 — `lantu/tools/code_search.py`**\n- `_semantic()`（第 69 行）：通过 `self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", arguments)` 调用 MCP 工具进行语义搜索。\n- `_exact()`（第 115 行）：通过 `self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_rg\", arguments)` 调用 MCP 工具进行精确搜索。\n- 两者均可在 MCP 不可用时回退到本地 `rg`（第 96-113 行）。\n\n**关键文件：** `lantu/config.py`、`lantu/runtime/builder.py`、`lantu/runtime/lifecycle.py`、`lantu/mcp/manager.py`、`lantu/tools/code_search.py`。",
+            "errors": []
+          },
+          {
+            "task": 3,
+            "prompt": "Explain how FileLedger state changes after ReadFile, after EditFile, and after a Session resume. Cite the implementation files.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/file_ledger.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 23.359,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "FileLedger 状态（`lantu/memory/file_ledger.py:94`）由三个映射构成：\n- `_entries` — 每个路径的最新 `FileLedgerEntry`（内容哈希、大小、行数、操作）\n- `_observations` — 持久化读取观察，键为 tool_call_id\n- `_visible_ranges` — 易变可见行区间，键为 (path, content_hash)\n\n三种场景的状态变化：\n\n**ReadFile 之后 — `lantu/agent.py:1341` `_record_file_ledger_event`**\n- 构建 `operation=\"read\"` 的 entry（offset/limit 取自参数），执行 `ledger.apply()`（`file_ledger.py:136`）：更新 `_entries[path]`，且因是 read 操作同时生成 `FileReadObservation` 存入 `_observations[tool_call_id]`（`file_ledger.py:138`）。\n- 会话记录 `file.observed` 事件。\n- 随后在结果真正进入对话时，`_prepare_tool_results`（`agent.py:1273-1339`）调用 `mark_visible()`（`file_ledger.py:165`）记录可见行区间（大文件仅头部/尾部预览可见），区间会排序合并。\n\n**EditFile 之后 — 同 `_record_file_ledger_event`（`agent.py:1341`）**\n- 操作映射为 `\"edit\"`，offset=0、limit=None。\n- 因为非 read，先执行 `ledger.invalidate(path)`（`file_ledger.py:201`）删除该路径所有旧 `content_hash` 的可见区间。\n- `ledger.apply(entry)` 用新哈希替换 `_entries[path]`；不生成 observation。\n- 会话记录 `file.updated` 事件。\n\n**Session resume — `lantu/memory/session.py:397` `SessionManager.resume`**\n- 读取会话 journal 事件后，调用 `_file_ledger_from_events()`（`session.py:761`）：遍历所有 `file.observed`/`file.updated` 事件并 `apply_payload()`，重建 `_entries`（每路径取最新）和 `_observations`。\n- `_visible_ranges` **不会**被重建——它始终以空开始，因为只是当前对话的易变投影；结果重新注入新会话窗口时再被 `mark_visible()` 标记。\n\n关键文件：`lantu/memory/file_ledger.py`、`lantu/agent.py`、`lantu/memory/session.py`。",
+            "errors": []
+          },
+          {
+            "task": 4,
+            "prompt": "Trace the decision path from context pressure measurement through stale tool cleanup and structured compaction to window rollover.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 43.426,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "完整决策链路（核心实现集中在 `lantu/context/manager.py`）：\n\n**1. 压力测量 — `lantu/agent.py:624` + `lantu/context/manager.py`**\n- Agent 主循环 `_run_core`（`agent.py:606`）每轮迭代顶部调用 `auto_compact()`。\n- `auto_compact()` 先在 `manager.py:1152` 用 `conversation.current_tokens()` 测量真实 token 用量（API 锚点 + 尾部估算），再调用 `analyze_context_pressure()`（`manager.py:1000`）。\n- 该函数按 `compute_compact_threshold` 的软/硬阈值把压力分级为 `none`/`soft`/`hard`（`manager.py:1030-1035`），并给出 `recommended_action`——其中 hard 且已有摘要时标记 `window_rollover_candidate`（`manager.py:1048-1051`）。\n- `auto_compact` 随后做双阈值判断：低于软线直接 `return None`；硬线以上强制压缩绕过熔断器（`manager.py:1165-1178`）。\n\n**2. 策略决策 — `CompactionPolicy.decide()`（`manager.py:128-159`）**\n- `none`→NONE；非用户边界→DEFER；`hard` 且 `existing_summary_tokens>0`→WINDOW_ROLLOVER；`recommended_action==compact_stale_tools`→COMPACT_STALE_TOOLS；`soft` 且缓存健康→DEFER；否则→STRUCTURED_SUMMARY。\n\n**3. 陈旧工具清理 — `manager.py:1191-1220`**\n- 命中 COMPACT_STALE_TOOLS 时调用 `compact_stale_tool_results()`（`manager.py:162`）把旧 tool result 换成预览占位，返回 `CompactEvent`。Agent 端（`agent.py:650`）对这类动作**不**清除可见区间、不重建环境。\n\n**4. 结构化压缩 / 窗口切换 — `manager.py:1222-1354`**\n- 走到摘要路径：`_compute_keep_start_index` 切分「待摘要前缀 + 保留尾部」，调用 LLM 生成 `summary`（`manager.py:1253` 重试循环）。\n- 若 `action==WINDOW_ROLLOVER`（`manager.py:1305`）用 `build_window_rollover_messages()`（交接摘要 + artifact 引用 + rollover 保留尾），否则用 `build_compact_messages()`（恢复附件）。两者都以 `conversation.replace_history()` 重建工作视图并清零用量锚点（`manager.py:1330`）。\n\n**5. 持久化到 Session — `__main__.py:577` / `ui/inline/app.py:400`**\n- `CompactEvent` 经 `CompactNotification`（`agent.py:638`）yield 给调用方。\n- 命中 WINDOW_ROLLOVER 时调用 `session.context_window_rolled_over(summary, keep, artifact_refs)`（`session.py:241`）：写入 `context.window.rolled_over` journal 事件，归档旧窗口（`archived_until_sequence`），更新 `active_window_id`，保存 meta cache。\n- 非 rollover 则走 `session.context_compacted()`；陈旧清理走 `session.tool_results_compacted()`。\n\nAgent 侧压缩后的环境重建在 `agent.py:650-656`（`file_ledger.clear_visible()` + 重新注入环境与长时记忆）。\n\n关键文件：`lantu/context/manager.py`、`lantu/agent.py`、`lantu/memory/session.py`、`lantu/__main__.py`、`lantu/ui/inline/app.py`。",
+            "errors": []
+          },
+          {
+            "task": 5,
+            "prompt": "Explain how an oversized tool result is persisted, previewed in Conversation, and later made recoverable. Cite the relevant functions.",
+            "expected_paths": [
+              "lantu/context/manager.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 54.236,
+            "tool_calls": [
+              "memory_search",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "完整生命周期（核心在 `lantu/context/manager.py`）：\n\n**1. 持久化 — `prepare_tool_results_with_metadata()`（`manager.py:443`）**\n- 每个 turn 的结果入对话前，若工具结果超过 `TOOL_RESULT_INLINE_CHAR_LIMIT`（8192 字符，`manager.py:23`）且非文件读取、未持久化过，就调用 `persist_tool_result()`（`manager.py:288`）把**完整原文**以原子写（`O_EXCL`）保存到 `<session_dir>/<tool_use_id>.txt`。\n\n**2. Conversation 预览 — `make_persisted_preview()`（`manager.py:299`）**\n- 对话中只保留一个包装块：`<persisted-output>` 标签 + 文件路径 + 预览。\n- 预览由 `make_head_tail_preview()`（`manager.py:339`）生成——默认保留头 4KB（`TOOL_RESULT_HEAD_CHARS`=4096）+ 尾 1KB（`TOOL_RESULT_TAIL_CHARS`=1024）。\n- 若多结果总超 `AGGREGATE_CHAR_LIMIT`（64000）还有一次**聚合降级**（`manager.py:507-535`）：从最大者开始缩到更小预览（512+128），仍超则降为纯引用 `make_persisted_reference()`（`manager.py:330`）。\n- 文件读取走独立分支 `make_file_read_preview()`（`manager.py:385`），保留完整行并报告可见区间。\n\n**3. 可恢复性** —— 三条路径保证 artifact 不丢：\n- **陈旧清理**：`compact_stale_tool_results()`（`manager.py:162`）扫描旧结果，已有 `<persisted-output>` 的缩为纯引用，意外遗留的超大原文先 `persist_tool_result()` 再缩。替换项经 `session.tool_results_compacted()`（`session.py:223`）记录为 `context.tool_results_compacted` 事件。\n- **会话恢复**：`_project_messages`（`session.py:630`）重放事件时按替换映射应用被压缩的内容（`session.py:688`）。\n- **窗口切换**：`context_window_rolled_over()`（`session.py:241`）用 `_artifact_refs_from_events()`（`session.py:519`）扫全量 journal 收集所有 `\"完整内容已保存到：\\n\"` 路径，写入 rollover 事件，确保跨窗口 artifact 可追溯。\n- **压缩附件**：`build_recovery_attachment()`（`manager.py:819`）把 `RecoveryState` 中的最近文件快照裁 token 后附到摘要上，模型无需重读即可引用。\n\n关键文件：`lantu/context/manager.py`、`lantu/memory/session.py`。",
+            "errors": []
+          },
+          {
+            "task": 6,
+            "prompt": "Trace how a tool schema view is recorded as a Schema Epoch and how that state is persisted for later requests or resume.",
+            "expected_paths": [
+              "lantu/agent.py",
+              "lantu/memory/session.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 49.48,
+            "tool_calls": [
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "完整链路（三个阶段：计算 → 记录 → 持久化 → 恢复）：\n\n**1. 计算 Epoch — `ToolRegistry.schema_epoch()`（`lantu/tools/__init__.py:279`）**\n- 从当前模型可见的所有工具 schema（`get_all_schemas`）计算 `name` + `schema_hash` 的状态列表，加上 `loading_mode` 和 `deferred_tools`，对全量 canonical dict 做一次 `_schema_hash()` 生成 `fingerprint`。\n- 返回 `SchemaEpoch`（`__init__.py:16`），`epoch_id = f\"schema-{fingerprint[:16]}\"`。\n\n**2. Agent 循环中记录 — `_sync_schema_epoch()`（`lantu/agent.py:1122`）**\n- Agent 主循环每轮迭代调用 LLM **之前**（`agent.py:661`）执行 `_sync_schema_epoch()`。\n- 对比 `registry.schema_epoch(protocol).epoch_id` 与当前 `_schema_epoch_id`；若不同则构建 payload（epoch_id, fingerprint, protocol, loading_mode, visible_tools, deferred_tools, previous_epoch_id, reason），通过 `session.record(ExecutionEvent(\"tool.schema.epoch.changed\", payload))` 写入 journal。\n- 变更原因分四种（`agent.py:1132-1139`）：`initial`（首次）、`mode_changed`（加载模式变）、`tool_loaded`（新工具发现）、`schema_changed`（schema 内容变）。\n\n**3. Session 持久化 — `Session.record()`（`lantu/memory/session.py:191`）**\n- 写入 NDJSON journal，同时在内存中更新 `self.schema_epoch = dict(event.payload)`（`session.py:200-201`）。\n\n**4. 窗口切换携带 — `context_window_rolled_over()`（`session.py:278`）**\n- 将 `self.schema_epoch` 序列化到 `context.window.rolled_over` 事件中，保证 epoch 身份跨窗口存活。\n\n**5. 恢复 — `SessionManager.resume()`（`session.py:419`）**\n- 调用 `_schema_epoch_from_events(events)`（`session.py:771`）：重放 journal 事件，取最新的 `tool.schema.epoch.changed` payload。\n- 恢复的 epoch 被存入 Session，随后由**6. Agent 恢复后复用 — `Agent.__init__`（`lantu/agent.py:343-350`）**\n- 构造时读取 `session.schema_epoch`，用其 `epoch_id` 初始化 `self._schema_epoch_id`（`agent.py:346`）。\n- 这使得恢复后的首个请求不会因为「重建的 epoch 与持久化值不一致」而误触发一次假的 epoch-change 记录；只有 schema 真的变化时 `_sync_schema_epoch` 才会再次写事件。\n\n**7. 请求携带 — `LensRequestRecorder.stream`（`lantu/tools/lens/request_trace.py:57-58`）**\n- 每次模型请求都带上 `schema_epoch_id`（`common[\"schema_epoch_id\"]`），用于把某次请求与它实际使用的工具 schema 视图在 trace 中关联起来。\n\n**完整链路小结：**\n`ToolRegistry.schema_epoch()`（`tools/__init__.py:279`，由指纹算 epoch_id）→ `Agent._sync_schema_epoch()`（`agent.py:1122`，对比后写事件）→ `Session.record()`（`session.py:191`，写 journal + 缓存到 `self.schema_epoch`）→ 窗口切换时 `context_window_rolled_over` 携带（`session.py:278`）→ resume 时 `_schema_epoch_from_events()` 重放恢复（`session.py:771`）→ Agent 构造时读回 `_schema_epoch_id`（`agent.py:346`）→ 每次请求经 `request_trace.py:58` 带上 epoch 标识。\n\n关键文件：`lantu/tools/__init__.py`、`lantu/agent.py`、`lantu/memory/session.py`、`lantu/tools/lens/request_trace.py`。",
+            "errors": []
+          },
+          {
+            "task": 7,
+            "prompt": "Trace how Session Journal events rebuild Conversation and FileLedger during resume, including the functions that replay events.",
+            "expected_paths": [
+              "lantu/memory/session.py",
+              "lantu/memory/file_ledger.py"
+            ],
+            "passed": false,
+            "elapsed_seconds": 26.106,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile",
+              "ReadFile",
+              "CodeSearch",
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "完整恢复链路集中在 `lantu/memory/session.py`。\n\n**1. 入口 — `SessionManager.resume()`（`session.py:397`）**\n- 读取 `<session_id>.jsonl`，`journal.read()` 取出全量 NDJSON 事件列表。\n\n**2. 补全中断态 — `_append_interruption_events()`（`session.py:794`）**\n- 扫描事件，追踪每个 in-flight 的 `runtime`/`turn`/`tool`/`model.request` 生命周期（started ↔ completed/interrupted/failed），对**仍处于活动、没有对应结束事件**的对象补写 `*.interrupted` 事件，避免恢复后卡在悬空状态。\n\n**3. 重建 Conversation — `_project_messages(events)`（`session.py:630`）**\n按事件序累积投影：\n- `message.created` → `_message_from_payload()` 直接重建 `Message`（`session.py:634`）。\n- `context.compacted` → 投影重置为「摘要 user 消息 + `kept_message_ids` 引用的消息」（`session.py:641-661`）。\n- `context.window.rolled_over` → 投影重置为「窗口交接摘要 + 历史工具结果索引 + kept 消息」（`session.py:662-687`）。\n- `context.tool_results_compacted` → 对投影中的工具结果按 `tool_use_id` 套用替换内容（`session.py:688-701`）。\n\n**4. 重建元数据与状态**\n- `_meta_from_events()`（`session.py:705`）：重建 `SessionMeta`（last_active、message_count、title）。\n- `_tool_schema_states()`（`session.py:740`）：按序重放 `tool.schema.loaded` 事件，恢复延迟加载工具的 schema 状态。\n- `_schema_epoch_from_events()`（`session.py:771`）：取最新 `tool.schema.epoch.changed` payload。\n- `_active_window_from_events()`（`session.py:780`）：重放 `session.created`/`context.window.rolled_over` 得到当前活跃 window_id。\n\n**5. 重建 FileLedger — `_file_ledger_from_events(events)`（`session.py:761`）**\n- 过滤 `file.observed` 和 `file.updated` 事件，逐个 `ledger.apply_payload()` 重放。\n- 由此重建 `_entries`（每路径最新 `FileLedgerEntry`）和 `_observations`（读取观察）；`_visible_ranges` 保持为空，待结果重新进入对话时再被 `mark_visible()` 标记。\n\n**6. 组装 Session — `resume()` 第 412-425 行**\n- 以重建出的 `meta`、`_tool_schema_states`、`file_ledger`、`schema_epoch`、`active_window_id` 构造 `Session`。\n- 调用 `_register_projected_messages()`（`session.py:345`）建立 `_message_ids` 映射，供后续 `commit_message`/kept-message 引用。\n\n**7. 返回恢复结果**\n- `resume()` 返回 `ResumeResult(session, projected messages, last_active)`，投影消息列表直接作为新对话的初始 history。\n\n关键文件：`lantu/memory/session.py`（`resume`、`_project_messages`、`_file_ledger_from_events`、`_append_interruption_events`、`_schema_epoch_from_events`、`_register_projected_messages`）。",
+            "errors": []
+          },
+          {
+            "task": 8,
+            "prompt": "Trace the complete CodeSearch fallback chain when zvec semantic or exact MCP search fails, down to native rg and Python Grep.",
+            "expected_paths": [
+              "lantu/tools/code_search.py",
+              "lantu/tools/grep.py"
+            ],
+            "passed": true,
+            "elapsed_seconds": 18.459,
+            "tool_calls": [
+              "ReadFile",
+              "ReadFile"
+            ],
+            "answer": "完整 fallback 链都在 `lantu/tools/code_search.py` 中。\n\n**`execute()`（第 52 行）** 分派：\n- `mode=semantic` 或 `auto` 且 `_looks_semantic()`（≥4 个词或含问号）→ `_semantic()`\n- 否则 → `_exact()`\n\n**语义路径 — `_semantic()`（第 69 行）**\n\n```\n_mcp_manager 为 None?\n  ├─ 是 → _fallback_exact()          [第 70-73 行]\n  └─ 否 → zvec_grep_search MCP 调用  [第 81-84 行]\n           ├─ 成功 → 返回结果 (backend: zvec_grep_search)\n           └─ 失败（异常或 isError）→ _fallback_exact()   [第 91-94 行]\n```\n\n**精确路径 — `_exact()`（第 115 行）**\n\n```\n_mcp_manager 为 None?\n  ├─ 是 → 直接 _fallback_exact()     [第 135 行]\n  └─ 否 → zvec_grep_rg MCP 调用      [第 122-124 行]\n           ├─ 成功 → 返回结果 (backend: zvec_grep_rg)\n           └─ 失败（异常或 isError）→ _fallback_exact()   [第 135 行]\n```\n\n**`_fallback_exact()`（第 96 行）** — 两级本地 fallback：\n\n```\n_local_rg(params)                    [第 98 行]\n  ├─ rg 可执行（shutil.which）且成功 → ToolResult (backend: rg)\n  ├─ rg 可执行但无匹配 → \"No matches found.\"\n  └─ rg 不可用或运行时错误 → None, 继续下路\n\n↓\n\nGrep.execute(GrepParams(...))        [第 104-107 行]\n  → Python 实现的纯文本搜索         (backend: python_grep)\n```\n\n**总 fallback 树：**\n\n```\nzvec_grep_search (语义)\n  └─ 失败 → zvec_grep_rg (精确)\n              └─ 失败 → 本地 rg (subprocess)\n                          └─ 失败 → Python Grep (内置)\n```\n\n每条路径的 meta 标记：MCP 成功路径标记 `\"degraded\": False`；所有本地 fallback 标记 `\"degraded\": True`；语义→精确回退额外标记 `\"semantic_fallback\": True`（除 `_exact` 的默认路径会 pop 掉它，避免混淆）。\n\n关键文件：`lantu/tools/code_search.py`（`_semantic`、`_exact`、`_fallback_exact`、`_local_rg`，以及 `lantu/tools/grep.py` 中的 `Grep`）。",
+            "errors": []
+          }
+        ]
+      }
+    ]
+  }
+}

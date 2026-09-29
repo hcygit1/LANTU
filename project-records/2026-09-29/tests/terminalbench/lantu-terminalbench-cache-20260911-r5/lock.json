@@ -1,0 +1,108 @@
+{
+    "schema_version": 3,
+    "created_at": "2026-09-11T05:14:04.763186Z",
+    "harbor": {
+        "version": "0.21.0",
+        "is_editable": false
+    },
+    "n_concurrent_trials": 1,
+    "retry": {
+        "max_retries": 0,
+        "exclude_exceptions": [
+            "RewardFileEmptyError",
+            "VerifierTimeoutError",
+            "VerifierOutputParseError",
+            "AgentSafetyRefusalError",
+            "RewardFileNotFoundError",
+            "ApiUsageLimitError",
+            "AgentAuthenticationError",
+            "ModelNotFoundError",
+            "AgentTimeoutError"
+        ],
+        "wait_multiplier": 1.0,
+        "min_wait_sec": 1.0,
+        "max_wait_sec": 60.0
+    },
+    "trials": [
+        {
+            "schema_version": 2,
+            "task": {
+                "name": "log-summary-date-ranges",
+                "type": "git",
+                "digest": "sha256:cc33d33ae36aa9d06318c3f16e4f23c08952c405f178f685f100c3595fd5bcbb",
+                "source": "terminal-bench",
+                "path": "log-summary-date-ranges",
+                "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+                "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
+            },
+            "install_only": false,
+            "timeout_multiplier": 1.0,
+            "agent_timeout_multiplier": 3.0,
+            "agent_setup_timeout_multiplier": 3.0,
+            "agent": {
+                "name": "evals.harbor:LantuAgent",
+                "model_name": "openai/deepseek-v4-flash",
+                "skills": [],
+                "resume_trajectory": false,
+                "extra_allowed_hosts": [],
+                "kwargs": {},
+                "mcp_servers": []
+            },
+            "skills": [],
+            "environment": {
+                "type": "docker",
+                "force_build": false,
+                "delete": true,
+                "cpu_enforcement_policy": "auto",
+                "memory_enforcement_policy": "auto",
+                "extra_docker_compose": [],
+                "kwargs": {},
+                "extra_allowed_hosts": []
+            },
+            "verifier": {
+                "disable": false,
+                "environment_mode": "shared"
+            }
+        },
+        {
+            "schema_version": 2,
+            "task": {
+                "name": "regex-log",
+                "type": "git",
+                "digest": "sha256:e7809982ba42e1da794d642f1c6652b6d49b09c4a13019dda9dcdaf37c30ea6b",
+                "source": "terminal-bench",
+                "path": "regex-log",
+                "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+                "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c"
+            },
+            "install_only": false,
+            "timeout_multiplier": 1.0,
+            "agent_timeout_multiplier": 3.0,
+            "agent_setup_timeout_multiplier": 3.0,
+            "agent": {
+                "name": "evals.harbor:LantuAgent",
+                "model_name": "openai/deepseek-v4-flash",
+                "skills": [],
+                "resume_trajectory": false,
+                "extra_allowed_hosts": [],
+                "kwargs": {},
+                "mcp_servers": []
+            },
+            "skills": [],
+            "environment": {
+                "type": "docker",
+                "force_build": false,
+                "delete": true,
+                "cpu_enforcement_policy": "auto",
+                "memory_enforcement_policy": "auto",
+                "extra_docker_compose": [],
+                "kwargs": {},
+                "extra_allowed_hosts": []
+            },
+            "verifier": {
+                "disable": false,
+                "environment_mode": "shared"
+            }
+        }
+    ]
+}

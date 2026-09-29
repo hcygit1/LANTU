@@ -1,0 +1,102 @@
+{
+    "id": "028948d0-26b4-48f6-bedf-b597f4d69bb3",
+    "task_name": "break-filter-js-from-html",
+    "trial_name": "break-filter-js-from-html__aL9RZgi",
+    "trial_uri": "file:///D:/code/LANTU/bench/results/terminalbench/lantu-terminalbench-simple-20260911-r2/break-filter-js-from-html__aL9RZgi",
+    "task_id": {
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "path": "break-filter-js-from-html"
+    },
+    "source": "terminal-bench",
+    "task_checksum": "3884d50f2e99f2afbe118f089adfb5727805cb8f60bcc9717ddd5eb02c4ec366",
+    "config": {
+        "task": {
+            "path": "break-filter-js-from-html",
+            "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+            "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+            "name": null,
+            "ref": null,
+            "overwrite": false,
+            "download_dir": null,
+            "source": "terminal-bench"
+        },
+        "trial_name": "break-filter-js-from-html__aL9RZgi",
+        "trials_dir": "bench\\results\\terminalbench\\lantu-terminalbench-simple-20260911-r2",
+        "install_only": false,
+        "timeout_multiplier": 1.0,
+        "agent_timeout_multiplier": 3.0,
+        "verifier_timeout_multiplier": null,
+        "agent_setup_timeout_multiplier": 3.0,
+        "environment_build_timeout_multiplier": null,
+        "agent": {
+            "name": "evals.harbor:LantuAgent",
+            "import_path": null,
+            "model_name": "openai/deepseek-v4-flash",
+            "n_concurrent": null,
+            "concurrency_group": null,
+            "skills": [],
+            "override_timeout_sec": null,
+            "override_setup_timeout_sec": null,
+            "max_timeout_sec": null,
+            "resume_trajectory": false,
+            "load_trajectory": null,
+            "extra_allowed_hosts": [],
+            "kwargs": {},
+            "mcp_servers": []
+        },
+        "environment": {
+            "type": "docker",
+            "import_path": null,
+            "force_build": false,
+            "delete": true,
+            "cpu_enforcement_policy": "auto",
+            "memory_enforcement_policy": "auto",
+            "override_cpus": null,
+            "override_memory_mb": null,
+            "override_storage_mb": null,
+            "override_gpus": null,
+            "override_tpu": null,
+            "mounts": null,
+            "extra_docker_compose": [],
+            "kwargs": {},
+            "extra_allowed_hosts": []
+        },
+        "verifier": {
+            "override_timeout_sec": null,
+            "max_timeout_sec": null,
+            "disable": false
+        },
+        "artifacts": [],
+        "extra_instruction_paths": [],
+        "job_id": "4e627ad5-5883-404a-8a85-f8742bb39d67",
+        "source_trial": null
+    },
+    "agent_info": {
+        "name": "lantu",
+        "version": "unknown",
+        "model_info": {
+            "name": "deepseek-v4-flash",
+            "provider": "openai"
+        }
+    },
+    "agent_result": null,
+    "verifier_result": null,
+    "verifier_environment_mode": "shared",
+    "exception_info": {
+        "exception_type": "EnvironmentStartTimeoutError",
+        "exception_message": "Environment start timed out after 600.0 seconds",
+        "exception_traceback": "Traceback (most recent call last):\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\tasks.py\", line 520, in wait_for\n    return await fut\n           ^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 908, in start\n    await self._run_docker_compose_command([\"up\", \"--detach\", \"--wait\"])\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 649, in _run_docker_compose_command\n    result = await self._collect_buffered_output(\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\environments\\docker\\docker.py\", line 679, in _collect_buffered_output\n    stdout_bytes, stderr_bytes = await process.communicate(input=stdin_data)\n                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\subprocess.py\", line 201, in communicate\n    stdin, stdout, stderr = await tasks.gather(stdin, stdout, stderr)\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\subprocess.py\", line 181, in _read_stream\n    output = await stream.read()\n             ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 706, in read\n    block = await self.read(self._limit)\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 713, in read\n    await self._wait_for_data('read')\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\streams.py\", line 545, in _wait_for_data\n    await self._waiter\nasyncio.exceptions.CancelledError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 1216, in _start_agent_environment\n    await asyncio.wait_for(\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\tasks.py\", line 519, in wait_for\n    async with timeouts.timeout(timeout):\n               ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\python\\cpython-3.12-windows-x86_64-none\\Lib\\asyncio\\timeouts.py\", line 115, in __aexit__\n    raise TimeoutError from exc_val\nTimeoutError\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 375, in run\n    await self._prepare()\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 409, in _prepare\n    await self._setup_agent_environment()\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 1210, in _setup_agent_environment\n    await self._start_agent_environment()\n  File \"C:\\Users\\Xuuuuuun\\AppData\\Roaming\\uv\\tools\\harbor\\Lib\\site-packages\\harbor\\trial\\trial.py\", line 1223, in _start_agent_environment\n    raise EnvironmentStartTimeoutError(\nharbor.trial.errors.EnvironmentStartTimeoutError: Environment start timed out after 600.0 seconds\n",
+        "occurred_at": "2026-09-11T03:09:19.293628Z"
+    },
+    "started_at": "2026-09-11T02:59:19.214610Z",
+    "finished_at": "2026-09-11T03:09:19.635416Z",
+    "environment_setup": {
+        "started_at": "2026-09-11T02:59:19.288263Z",
+        "finished_at": "2026-09-11T03:09:19.289092Z"
+    },
+    "agent_setup": null,
+    "agent_execution": null,
+    "verifier": null,
+    "step_results": null
+}

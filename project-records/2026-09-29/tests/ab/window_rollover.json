@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-10",
+  "model": "deepseek-v4-flash",
+  "passed": true,
+  "same_session_after_resume": true,
+  "window_changed": true,
+  "actions": ["window_rollover"],
+  "before_tokens": 99000,
+  "after_rollover_tokens": 3530,
+  "token_reduction": 95470,
+  "marker_recovered": true,
+  "artifact_exists_after_resume": true,
+  "artifact_indexed": true,
+  "old_tool_result_absent_from_projection": true,
+  "model_requests": 3,
+  "prompt_tokens": 43056,
+  "cached_tokens": 5632,
+  "cache_hit_rate": 0.1308063916759569,
+  "errors": []
+}

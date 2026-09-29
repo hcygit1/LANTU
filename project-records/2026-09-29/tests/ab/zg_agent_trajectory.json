@@ -1,0 +1,239 @@
+{
+  "date": "2026-09-10",
+  "runs_per_variant": 1,
+  "baseline": {
+    "variant": "baseline_rg",
+    "model": "deepseek-v4-flash",
+    "tasks_passed": 4,
+    "tasks_total": 5,
+    "elapsed_seconds": 92.827,
+    "tool_calls": {
+      "CodeSearch": 17,
+      "ReadFile": 15
+    },
+    "total_tool_calls": 32,
+    "read_file_calls": 15,
+    "input_tokens": 48894,
+    "cache_read_tokens": 367104,
+    "output_tokens": 3958,
+    "errors": [],
+    "tasks": [
+      {
+        "task": 1,
+        "prompt": "Locate the FileLedger class and explain in one sentence what state it stores.",
+        "expected_paths": [
+          "lantu/memory/file_ledger.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 10.879,
+        "tool_calls": [
+          "CodeSearch",
+          "ReadFile"
+        ],
+        "answer": "The `FileLedger` class at `lantu/memory/file_ledger.py:94` is a session-local projection storing three state maps: `_entries` (one latest `FileLedgerEntry` per path, with content hash, size, line count, operation), `_observations` (persistent read observations keyed by tool call id), and `_visible_ranges` (volatile line ranges actually visible in the current conversation, cleared on compaction).",
+        "errors": []
+      },
+      {
+        "task": 2,
+        "prompt": "Find where repeated visible file ranges are removed before tool results enter conversation history.",
+        "expected_paths": [
+          "lantu/agent.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 12.654,
+        "tool_calls": [
+          "CodeSearch",
+          "ReadFile",
+          "CodeSearch",
+          "ReadFile"
+        ],
+        "answer": "在 `lantu/agent.py:1266-1295` 的 `_prepare_tool_results` 方法中：它对每个 `ToolResultBlock` 查找对应的 `FileReadObservation`，如果 `file_ledger.is_visible()` 返回 True（即该文件版本的行范围已在对话中可见），则将该结果替换为一条 \"already visible\" 的占位消息，从而避免重复内容进入对话历史。",
+        "errors": []
+      },
+      {
+        "task": 3,
+        "prompt": "Trace how project model configuration is loaded and then used to create the model client. Name both key files.",
+        "expected_paths": [
+          "lantu/config.py",
+          "lantu/client.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 47.776,
+        "tool_calls": [
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "ReadFile",
+          "ReadFile",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "CodeSearch",
+          "ReadFile",
+          "ReadFile",
+          "ReadFile",
+          "CodeSearch",
+          "ReadFile",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "ReadFile"
+        ],
+        "answer": "两个关键文件：`lantu/config.py` 和 `lantu/client.py`。\n\n配置加载在 `lantu/config.py:278` 的 `load_config()`：它按优先级合并 `~/.lantu/config.yaml`、项目 `.lantu/config.yaml` 和 `.lantu/config.local.yaml`，返回一个 `AppConfig`（内含 `providers`，每个都是 `ProviderConfig` dataclass，见 `lantu/config.py:31`）。\n\n模型客户端创建在 `lantu/client.py:740` 的 `create_client(config: ProviderConfig)`：它读取单个 `ProviderConfig` 的 `protocol` 字段，据此分派构造 `AnthropicClient` / `OpenAIClient` / `OpenAICompatClient`（客户端内部通过 `config.resolve_api_key()` 解析 API key，`lantu/client.py:228`）。\n\n两者通过 `lantu/__main__.py` 串联：入口 `_main` 调用 `load_config()`（`lantu/__main__.py:315`），随后在 prompt 模式直接 `create_client(provider)`（`lantu/__main__.py:392`），交互模式则经 `run_inline` → `runtime/builder.py:87` 的 `_build_core` 用同一个 `create_client(provider)` 构建客户端。",
+        "errors": []
+      },
+      {
+        "task": 4,
+        "prompt": "Locate the policy that decides when hard context pressure becomes a window rollover.",
+        "expected_paths": [
+          "lantu/context/manager.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 13.611,
+        "tool_calls": [
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile"
+        ],
+        "answer": "政策有两处。决策规则在 `lantu/context/manager.py:1048-1051` 的 `analyze_context_pressure` 中：当 `pressure_level == \"hard\"` 且 `existing_summary_tokens > 0`（即之前已摘要的会话又满）时，`recommended_action` 被标记为 `\"window_rollover_candidate\"`。\n\n对应的策略类在 `lantu/context/manager.py:115-159` 的 `CompactionPolicy`，其中 `lantu/context/manager.py:150` 同样检查 `pressure_level == \"hard\" and report.existing_summary_tokens > 0`，返回 `WINDOW_ROLLOVER` 动作，随后在 `auto_compact`（`lantu/context/manager.py:1307`）中触发 `build_window_rollover_messages` 真正执行切换。",
+        "errors": []
+      },
+      {
+        "task": 5,
+        "prompt": "Find how CodeSearch connects semantic repository search to the MCP manager.",
+        "expected_paths": [
+          "lantu/tools/code_search.py",
+          "lantu/mcp/manager.py"
+        ],
+        "passed": false,
+        "elapsed_seconds": 7.907,
+        "tool_calls": [
+          "ReadFile"
+        ],
+        "answer": "CodeSearch 连接 MCP manager 的方式在 `lantu/tools/code_search.py`：\n\n- 注入点：`CodeSearch.__init__` 初始 `self._mcp_manager = None`（`lantu/tools/code_search.py:46`），通过 `set_mcp_manager(manager)`（`lantu/tools/code_search.py:49-50`）注入 manager。\n- 调用点：语义搜索在 `_semantic` 里调用 `self._mcp_manager.call_tool(\"zvec_grep\", \"zvec_grep_search\", arguments)`（`lantu/tools/code_search.py:82-84`），精确搜索在 `_exact` 里调用 `zvec_grep_rg`（`lantu/tools/code_search.py:123-125`）。\n- 降级：若 manager 为 `None` 或调用异常/返回错误，都回退到本地 rg 或内置 Python Grep（`_fallback_exact`，`lantu/tools/code_search.py:96-113`）。\n\n即：语义仓库搜索通过 `mcp_server = \"zvec_grep\"` 的 MCP 工具调用完成，manager 由外部注入。",
+        "errors": []
+      }
+    ]
+  },
+  "optimized": {
+    "variant": "optimized_zg",
+    "model": "deepseek-v4-flash",
+    "tasks_passed": 4,
+    "tasks_total": 5,
+    "elapsed_seconds": 78.08,
+    "tool_calls": {
+      "CodeSearch": 19,
+      "ReadFile": 12
+    },
+    "total_tool_calls": 31,
+    "read_file_calls": 12,
+    "input_tokens": 49797,
+    "cache_read_tokens": 378624,
+    "output_tokens": 3382,
+    "errors": [],
+    "tasks": [
+      {
+        "task": 1,
+        "prompt": "Locate the FileLedger class and explain in one sentence what state it stores.",
+        "expected_paths": [
+          "lantu/memory/file_ledger.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 6.522,
+        "tool_calls": [
+          "CodeSearch",
+          "ReadFile"
+        ],
+        "answer": "`FileLedger` (at `lantu/memory/file_ledger.py:94`) stores a per-path projection of file state: the latest `FileLedgerEntry` per path, persistent read observations keyed by path, and volatile visible line ranges keyed by (path, tool-call-id) that can be cleared on compaction.",
+        "errors": []
+      },
+      {
+        "task": 2,
+        "prompt": "Find where repeated visible file ranges are removed before tool results enter conversation history.",
+        "expected_paths": [
+          "lantu/agent.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 18.351,
+        "tool_calls": [
+          "CodeSearch",
+          "ReadFile",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile"
+        ],
+        "answer": "In `lantu/agent.py:1266-1339`, the `_prepare_tool_results` method checks each file-read result against the ledger's `is_visible()` — if the exact same file version and line range is already recorded as visible, it replaces the result content with a stub message (\"already visible in the conversation\") instead of sending the full content to history again.",
+        "errors": []
+      },
+      {
+        "task": 3,
+        "prompt": "Trace how project model configuration is loaded and then used to create the model client. Name both key files.",
+        "expected_paths": [
+          "lantu/config.py",
+          "lantu/client.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 34.132,
+        "tool_calls": [
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "ReadFile",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "CodeSearch",
+          "ReadFile",
+          "ReadFile",
+          "CodeSearch"
+        ],
+        "answer": "The model configuration is loaded and turned into a client across two files:\n\n1. **`lantu/config.py:278`** — `load_config()` reads and merges project config from `.lantu/config.yaml` (falling back to `~/.lantu/config.yaml`, then `.lantu/config.local.yaml`) into an `AppConfig` with a list of `ProviderConfig` entries.\n\n2. **`lantu/__main__.py:315`** calls `load_config()`, then `lantu/__main__.py:260` picks a provider via `select_provider()`, passing it to `lantu/runtime/builder.py:87`, where `create_client(provider)` (defined at `lantu/client.py:740`) instantiates the matching `AnthropicClient`/`OpenAIClient`/`OpenAICompatClient` based on the provider's `protocol`.",
+        "errors": []
+      },
+      {
+        "task": 4,
+        "prompt": "Locate the policy that decides when hard context pressure becomes a window rollover.",
+        "expected_paths": [
+          "lantu/context/manager.py"
+        ],
+        "passed": true,
+        "elapsed_seconds": 8.507,
+        "tool_calls": [
+          "CodeSearch",
+          "ReadFile",
+          "ReadFile"
+        ],
+        "answer": "The window-rollover policy lives in `lantu/context/manager.py`. Hard pressure is classified at `manager.py:1030-1035` (`analyze_context_pressure` sets `pressure_level = \"hard\"` once `current_tokens` exceeds the hard threshold), which also marks the recommended action as `window_rollover_candidate` when a prior compaction summary is present (`manager.py:1048-1051`). The final decision is made by `CompactionPolicy.decide` at `manager.py:150-151`: it returns `WINDOW_ROLLOVER` when pressure is **hard** and the working view already contains an existing summary (i.e. a previously compacted context has filled up again).",
+        "errors": []
+      },
+      {
+        "task": 5,
+        "prompt": "Find how CodeSearch connects semantic repository search to the MCP manager.",
+        "expected_paths": [
+          "lantu/tools/code_search.py",
+          "lantu/mcp/manager.py"
+        ],
+        "passed": false,
+        "elapsed_seconds": 10.568,
+        "tool_calls": [
+          "CodeSearch",
+          "ReadFile"
+        ],
+        "answer": "The connection is made in `lantu/runtime/lifecycle.py` in `initialize_runtime_mcp` (lines 219-235): it creates an `MCPManager`, loads the configs and registers MCP tools (line 223-224), then retrieves the `CodeSearch` tool and injects the manager via `code_search.set_mcp_manager(manager)` (lines 228-230). `CodeSearch` stores it as `self._mcp_manager` (`lantu/tools/code_search.py:49-50`) and uses it in `_semantic` (`code_search.py:69-74`) to call the `zvec_grep_search` MCP tool for semantic queries, with `_exact` (`code_search.py:115-137`) using `zvec_grep_rg` for exact-mode searches.",
+        "errors": []
+      }
+    ]
+  }
+}
