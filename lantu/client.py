@@ -147,7 +147,14 @@ def _mark_last_tool_for_cache(tools: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 class LLMError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class AuthenticationError(LLMError):
@@ -417,7 +424,10 @@ class AnthropicClient(LLMClient):
         except _anthropic.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _anthropic.APIStatusError as e:
-            raise LLMError(f"API error ({e.status_code}): {e.message}") from e
+            raise LLMError(
+                f"API error ({e.status_code}): {e.message}",
+                status_code=e.status_code,
+            ) from e
 
 
 class OpenAIClient(LLMClient):
@@ -547,7 +557,10 @@ class OpenAIClient(LLMClient):
         except _openai.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _openai.APIStatusError as e:
-            raise LLMError(f"API error ({e.status_code}): {e.message}") from e
+            raise LLMError(
+                f"API error ({e.status_code}): {e.message}",
+                status_code=e.status_code,
+            ) from e
 
 
 class OpenAICompatClient(LLMClient):
@@ -736,7 +749,10 @@ class OpenAICompatClient(LLMClient):
         except _openai.APIConnectionError as e:
             raise NetworkError(f"Network error: {e}") from e
         except _openai.APIStatusError as e:
-            raise LLMError(f"API error ({e.status_code}): {e.message}") from e
+            raise LLMError(
+                f"API error ({e.status_code}): {e.message}",
+                status_code=e.status_code,
+            ) from e
 
 
 def create_client(config: ProviderConfig) -> LLMClient:

@@ -5,10 +5,11 @@ from typing import AsyncIterator
 
 import pytest
 
-from lantu.client import LLMClient, _record_prepared_request
+from lantu.client import LLMClient, NetworkError, _record_prepared_request
 from lantu.conversation import ConversationManager
 from lantu.tools.base import StreamEnd, StreamEvent, TextDelta
 from lantu.tools.lens.request_trace import LensRequestRecorder
+from lantu.llm_retry import RetryPolicy
 
 
 class FakeSession:
@@ -79,4 +80,47 @@ async def test_request_recorder_links_fingerprints_and_usage() -> None:
     assert recorded[-1].payload["cache_read_tokens"] == 80
     assert "secret prompt" not in repr([event.payload for event in recorded])
     assert "secret system" not in repr([event.payload for event in recorded])
+
+
+class RetryClient(LLMClient):
+    model = "retry-model"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def stream(self, conversation, system="", tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            yield TextDelta("partial")
+            raise NetworkError("connection reset")
+        yield TextDelta("complete")
+        yield StreamEnd("end_turn", input_tokens=1, output_tokens=1)
+
+
+@pytest.mark.asyncio
+async def test_request_recorder_retries_without_leaking_partial_stream() -> None:
+    session = FakeSession()
+    client = RetryClient()
+    recorder = LensRequestRecorder(
+        session,
+        protocol="openai-compat",
+        retry_policy=RetryPolicy(max_attempts=2, base_delay_seconds=0, jitter_seconds=0),
+    )
+
+    events = [
+        event
+        async for event in recorder.stream(
+            client,
+            ConversationManager(),
+            call_kind="main",
+        )
+    ]
+
+    assert client.calls == 2
+    assert [type(event).__name__ for event in events] == ["TextDelta", "StreamEnd"]
+    assert events[0].text == "complete"
+    event_types = [event.event_type for event in session.events]
+    assert event_types.count("model.request.started") == 2
+    assert "model.request.retry_scheduled" in event_types
+    assert event_types[-2:] == ["model.request.completed", "usage.recorded"]
 

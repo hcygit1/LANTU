@@ -13,6 +13,8 @@ from lantu.tools.lens.fingerprint import (
     build_assembly_fingerprint,
     build_payload_fingerprint,
 )
+from lantu.llm_retry import RetryPolicy
+from lantu.client import LLMError
 
 
 class LensRequestRecorder:
@@ -24,10 +26,12 @@ class LensRequestRecorder:
         *,
         protocol: str,
         agent_id: str | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self.session = session
         self.protocol = protocol
         self.agent_id = agent_id
+        self.retry_policy = retry_policy or RetryPolicy()
 
     def _record(self, event_type: str, payload: dict[str, Any]) -> None:
         if self.session is None:
@@ -62,82 +66,85 @@ class LensRequestRecorder:
             tools or [],
             conversation.get_messages(),
         )
-        self._record(
-            "model.request.started",
-            {**common, "assembly": assembly.to_payload()},
-        )
-
-        prepared_recorded = False
-
-        def record_prepared(kwargs: dict[str, Any]) -> None:
-            nonlocal prepared_recorded
-            if prepared_recorded:
-                return
-            prepared_recorded = True
-            fingerprint = build_payload_fingerprint(kwargs)
-            self._record(
-                "model.request.prepared",
-                {**common, "payload": fingerprint.to_payload()},
-            )
-
         started = time.monotonic()
-        usage: StreamEnd | None = None
         session_id = (
             str(getattr(self.session, "session_id", "")) or None
             if self.session is not None
             else None
         )
-        try:
-            with model_call_context(
-                model_call_id,
-                session_id,
-                on_prepared=record_prepared,
-            ):
-                async for event in client.stream(
-                    conversation,
-                    system=system,
-                    tools=tools,
-                ):
-                    if isinstance(event, StreamEnd):
-                        usage = event
-                    yield event
-        except asyncio.CancelledError:
+        for attempt in range(1, self.retry_policy.max_attempts + 1):
+            attempt_common = {**common, "attempt": attempt}
             self._record(
-                "model.request.interrupted",
-                {
-                    **common,
-                    "reason": "cancelled",
-                    "result_known": False,
-                    "elapsed_ms": int((time.monotonic() - started) * 1000),
-                },
+                "model.request.started",
+                {**attempt_common, "assembly": assembly.to_payload()},
             )
-            raise
-        except Exception as exc:
-            self._record(
-                "model.request.failed",
-                {
-                    **common,
-                    "error": {"type": type(exc).__name__, "message": str(exc)},
-                    "elapsed_ms": int((time.monotonic() - started) * 1000),
-                },
-            )
-            raise
+            prepared_recorded = False
 
-        self._record(
-            "model.request.completed",
-            {
-                **common,
-                "elapsed_ms": int((time.monotonic() - started) * 1000),
-            },
-        )
-        if usage is not None:
+            def record_prepared(kwargs: dict[str, Any]) -> None:
+                nonlocal prepared_recorded
+                if prepared_recorded:
+                    return
+                prepared_recorded = True
+                fingerprint = build_payload_fingerprint(kwargs)
+                self._record(
+                    "model.request.prepared",
+                    {**attempt_common, "payload": fingerprint.to_payload()},
+                )
+
+            events: list[StreamEvent] = []
+            usage: StreamEnd | None = None
+            try:
+                with model_call_context(
+                    model_call_id,
+                    session_id,
+                    on_prepared=record_prepared,
+                ):
+                    async for event in client.stream(
+                        conversation,
+                        system=system,
+                        tools=tools,
+                    ):
+                        events.append(event)
+                        if isinstance(event, StreamEnd):
+                            usage = event
+                if usage is None:
+                    raise LLMError("Model stream ended without a final usage event")
+            except asyncio.CancelledError:
+                self._record(
+                    "model.request.interrupted",
+                    {**attempt_common, "reason": "cancelled", "result_known": False,
+                     "elapsed_ms": int((time.monotonic() - started) * 1000)},
+                )
+                raise
+            except Exception as exc:
+                self._record(
+                    "model.request.failed",
+                    {**attempt_common, "error": {"type": type(exc).__name__, "message": str(exc)},
+                     "elapsed_ms": int((time.monotonic() - started) * 1000)},
+                )
+                if not isinstance(exc, LLMError) or not self.retry_policy.should_retry(exc, attempt):
+                    raise
+                delay = self.retry_policy.delay_seconds(exc, attempt)
+                self._record(
+                    "model.request.retry_scheduled",
+                    {**attempt_common, "next_attempt": attempt + 1,
+                     "delay_ms": int(delay * 1000)},
+                )
+                await asyncio.sleep(delay)
+                continue
+
             self._record(
-                "usage.recorded",
-                {
-                    **common,
-                    "input_tokens": usage.input_tokens,
-                    "output_tokens": usage.output_tokens,
-                    "cache_read_tokens": usage.cache_read,
-                    "cache_creation_tokens": usage.cache_creation,
-                },
+                "model.request.completed",
+                {**attempt_common, "elapsed_ms": int((time.monotonic() - started) * 1000)},
             )
+            if usage is not None:
+                self._record(
+                    "usage.recorded",
+                    {**attempt_common, "input_tokens": usage.input_tokens,
+                     "output_tokens": usage.output_tokens,
+                     "cache_read_tokens": usage.cache_read,
+                     "cache_creation_tokens": usage.cache_creation},
+                )
+            for event in events:
+                yield event
+            return

@@ -40,6 +40,7 @@ EVENT_TYPES = frozenset(
         "model.request.completed",
         "model.request.failed",
         "model.request.interrupted",
+        "model.request.retry_scheduled",
         "usage.recorded",
     }
 )

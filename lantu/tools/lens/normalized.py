@@ -27,6 +27,7 @@ _KINDS = {
     "model.request.completed": "model",
     "model.request.failed": "model",
     "model.request.interrupted": "model",
+    "model.request.retry_scheduled": "model",
     "permission.decided": "permission",
     "error.occurred": "error",
     "session.created": "lifecycle",
