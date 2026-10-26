@@ -24,10 +24,14 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 from .install import (
+    NODE_DIST_NAME,
+    RG_DIST_NAME,
     container_proxy_url,
     discover_host_proxy,
     prepare_ca_bundle,
     prepare_install_assets,
+    prepare_node_asset,
+    prepare_rg_asset,
     proxy_env,
 )
 from .parser import build_task_instruction, parse_metrics
@@ -37,6 +41,14 @@ from .settings import resolve_reasoning_effort
 LANTU_REPOSITORY = "https://github.com/hcygit1/LANTU.git"
 LANTU_COMMIT = "00a4ea0317c14c2c44cfc736a85408157a016442"
 DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# Terminal-Bench containers ship no Node.js, and the distro packages (18.x on
+# bookworm/noble) are older than zvec-grep's ``engines.node >= 22``, so the
+# agent install phase provisions the official Node.js release cached on the
+# host by ``prepare_node_asset``.
+ZVEC_GREP_VERSION = "0.2.2"
+
+
 class LantuAgent(BaseInstalledAgent):
     """Run the LANTU CLI in non-interactive, stream-json mode."""
 
@@ -51,7 +63,12 @@ class LantuAgent(BaseInstalledAgent):
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
-        """Install uv and the pinned LANTU revision for reproducible trials."""
+        """Install uv, the pinned LANTU revision, and the search backend.
+
+        With ``LANTU_PLAIN_RG=1`` (plain-ripgrep comparison arm) the zvec-grep
+        MCP server and Node.js are skipped and a static ripgrep binary is
+        installed into ``/usr/local/bin`` instead.
+        """
         host_proxy = discover_host_proxy(self._get_env)
         container_proxy = (
             host_proxy.replace("127.0.0.1", "host.docker.internal")
@@ -59,6 +76,7 @@ class LantuAgent(BaseInstalledAgent):
             if host_proxy
             else None
         )
+        plain_rg = bool(self._get_env("LANTU_PLAIN_RG"))
         uv_binary, source_archive = prepare_install_assets(
             Path(__file__).resolve().parents[2], LANTU_COMMIT, host_proxy
         )
@@ -93,6 +111,60 @@ class LantuAgent(BaseInstalledAgent):
             env=install_env,
             timeout_sec=360,
         )
+        if plain_rg:
+            # Plain-ripgrep comparison arm: put a static rg on PATH and stop.
+            rg_tarball = prepare_rg_asset(host_proxy)
+            await environment.upload_file(rg_tarball, "/tmp/lantu-rg.tar.gz")
+            await self.exec_as_root(
+                environment,
+                command=(
+                    "set -euo pipefail; "
+                    "rm -rf /tmp/lantu-rg; mkdir -p /tmp/lantu-rg; "
+                    "tar -xzf /tmp/lantu-rg.tar.gz -C /tmp/lantu-rg; "
+                    f"install -m 0755 /tmp/lantu-rg/{RG_DIST_NAME}/rg "
+                    "/usr/local/bin/rg; "
+                    "rm -rf /tmp/lantu-rg /tmp/lantu-rg.tar.gz; "
+                    "rg --version | head -n 1"
+                ),
+                env=install_env,
+                timeout_sec=120,
+            )
+            return
+        # Task images ship no Node.js, so provision the uploaded release under
+        # ``/usr/local`` as root (the agent itself runs as root here).
+        node_tarball = prepare_node_asset(host_proxy)
+        await environment.upload_file(node_tarball, "/tmp/lantu-node.tar.gz")
+        await self.exec_as_root(
+            environment,
+            command=(
+                "set -euo pipefail; "
+                "rm -rf /tmp/lantu-node; mkdir -p /tmp/lantu-node; "
+                "tar -xzf /tmp/lantu-node.tar.gz -C /tmp/lantu-node; "
+                f"cp -a /tmp/lantu-node/{NODE_DIST_NAME}/. /usr/local/; "
+                "rm -rf /tmp/lantu-node /tmp/lantu-node.tar.gz; "
+                "node -v; npm -v"
+            ),
+            env=install_env,
+            timeout_sec=180,
+        )
+        # ``onnxruntime-node`` bundles its CPU binaries but its install script
+        # still pulls multi-GB CUDA binaries from GitHub on linux/x64; the agent
+        # only needs CPU inference for local embeddings. See
+        # node_modules/onnxruntime-node/script/install.js for the skip flag.
+        zg_env = dict(install_env)
+        zg_env["ONNXRUNTIME_NODE_INSTALL_CUDA"] = "skip"
+        await self.exec_as_root(
+            environment,
+            command=(
+                "set -euo pipefail; "
+                "npm install -g --no-fund --no-audit "
+                "--fetch-retries 5 --fetch-retry-maxtimeout 120000 "
+                f"@zvec/zvec-grep@{ZVEC_GREP_VERSION}; "
+                "zg --version"
+            ),
+            env=zg_env,
+            timeout_sec=600,
+        )
 
     @override
     @with_prompt_template
@@ -120,6 +192,7 @@ class LantuAgent(BaseInstalledAgent):
         reasoning_effort = resolve_reasoning_effort(
             self._get_env("LANTU_REASONING_EFFORT")
         )
+        plain_rg = bool(self._get_env("LANTU_PLAIN_RG"))
         config = {
             "providers": [
                 {
@@ -134,6 +207,19 @@ class LantuAgent(BaseInstalledAgent):
             ],
             "permission_mode": "bypassPermissions",
         }
+        if not plain_rg:
+            # zvec-grep is installed globally during the install phase and speaks
+            # MCP over stdio; the ``full`` toolset exposes the managed ripgrep
+            # search, which needs no pre-built workspace index. The name must be
+            # ``zvec_grep`` to match Grep's and SemanticSearch's MCP routing key.
+            config["mcp_servers"] = [
+                {
+                    "name": "zvec_grep",
+                    "command": "zg",
+                    "args": ["server", "--stdio", "--mcp-toolset", "full"],
+                    "env": {"HOME": config_home},
+                }
+            ]
         host_proxy = discover_host_proxy(self._get_env)
         container_proxy = container_proxy_url(host_proxy) if host_proxy else None
         await environment.upload_file(prepare_ca_bundle(), "/tmp/lantu-ca-bundle.pem")
@@ -150,6 +236,7 @@ class LantuAgent(BaseInstalledAgent):
             f"mkdir -p {shlex.quote(config_home + '/.lantu')}; "
             f"printf '%s' {shlex.quote(config_text)} > {shlex.quote(config_path)}"
         )
+
         escaped_instruction = shlex.quote(build_task_instruction(instruction))
 
         await self.exec_as_agent(

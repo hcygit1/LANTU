@@ -17,6 +17,18 @@ UV_ARCHIVE_URL = (
     f"https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/"
     "uv-x86_64-unknown-linux-gnu.tar.gz"
 )
+# zvec-grep requires Node.js >= 22, which no Terminal-Bench image provides.
+NODE_VERSION = "22.23.4"
+NODE_DIST_NAME = f"node-v{NODE_VERSION}-linux-x64"
+NODE_TARBALL_URL = f"https://nodejs.org/dist/v{NODE_VERSION}/{NODE_DIST_NAME}.tar.gz"
+# Comparison-arm ripgrep: a static musl binary dropped into /usr/local/bin so
+# the plain-rg arm has real ``rg`` coverage without the zvec-grep MCP server.
+RG_VERSION = "14.1.1"
+RG_DIST_NAME = f"ripgrep-{RG_VERSION}-x86_64-unknown-linux-musl"
+RG_TARBALL_URL = (
+    "https://github.com/BurntSushi/ripgrep/releases/download/"
+    f"{RG_VERSION}/{RG_DIST_NAME}.tar.gz"
+)
 LOCAL_PROXY_CA_PATHS = (
     Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.pem",
     Path.home() / ".mitmproxy" / "mitmproxy-ca-cert.cer",
@@ -146,3 +158,45 @@ def prepare_install_assets(
             for path in source_paths:
                 archive.add(path, arcname=path.relative_to(repository_root).as_posix())
     return uv_binary, source_archive
+
+
+def prepare_node_asset(host_proxy: str | None) -> Path:
+    """Cache the official Linux/x64 Node.js tarball on the host.
+
+    Downloading it inside the container takes minutes on every trial, so the
+    archive is fetched once and uploaded alongside the other install assets.
+    """
+    cache_dir = Path(tempfile.gettempdir()) / "lantu-harbor-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tarball = cache_dir / f"{NODE_DIST_NAME}.tar.gz"
+
+    if not tarball.is_file():
+        opener = build_opener(
+            ProxyHandler({"http": host_proxy, "https": host_proxy})
+            if host_proxy
+            else ProxyHandler()
+        )
+        with opener.open(NODE_TARBALL_URL, timeout=180) as response:
+            tarball.write_bytes(response.read())
+    return tarball
+
+
+def prepare_rg_asset(host_proxy: str | None) -> Path:
+    """Cache the static Linux/x64 ripgrep tarball on the host.
+
+    Used only by the plain-rg comparison arm (``LANTU_PLAIN_RG=1``): the
+    archive is fetched once and uploaded like the other install assets.
+    """
+    cache_dir = Path(tempfile.gettempdir()) / "lantu-harbor-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    tarball = cache_dir / f"{RG_DIST_NAME}.tar.gz"
+
+    if not tarball.is_file():
+        opener = build_opener(
+            ProxyHandler({"http": host_proxy, "https": host_proxy})
+            if host_proxy
+            else ProxyHandler()
+        )
+        with opener.open(RG_TARBALL_URL, timeout=180) as response:
+            tarball.write_bytes(response.read())
+    return tarball

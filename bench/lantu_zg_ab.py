@@ -10,7 +10,8 @@ from typing import Any
 
 from lantu.config import MCPServerConfig
 from lantu.mcp.manager import MCPManager
-from lantu.tools.code_search import CodeSearch, CodeSearchParams
+from lantu.tools.code_search import SemanticSearch, SemanticSearchParams
+from lantu.tools.grep import Grep, Params as GrepParams
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,19 +25,24 @@ QUERIES = (
 )
 
 
-async def _run(tool: CodeSearch, query: str, mode: str) -> dict[str, Any]:
+async def _run(tool: SemanticSearch | Grep, query: str, mode: str) -> dict[str, Any]:
     started = time.perf_counter()
-    result = await tool.execute(
-        CodeSearchParams(query=query, mode=mode, path="lantu", include="lantu/**", limit=5)
-    )
+    if mode == "semantic":
+        result = await tool.execute(
+            SemanticSearchParams(query=query, path="lantu", include="lantu/**", limit=5)
+        )
+    else:
+        result = await tool.execute(
+            GrepParams(pattern=query, path="lantu", include="lantu/**")
+        )
     elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
     output = result.output
     return {
         "query": query,
         "mode": mode,
-        "backend": result.meta.get("backend"),
-        "degraded": result.meta.get("degraded", False),
-        "mcp_error": result.meta.get("mcp_error", ""),
+        "backend": (result.meta or {}).get("backend"),
+        "degraded": (result.meta or {}).get("degraded", False),
+        "mcp_error": (result.meta or {}).get("semantic_error", ""),
         "is_error": result.is_error,
         "found": output != "No matches found." and not result.is_error,
         "output_chars": len(output),
@@ -46,7 +52,6 @@ async def _run(tool: CodeSearch, query: str, mode: str) -> dict[str, Any]:
 
 
 async def main() -> None:
-    baseline_tool = CodeSearch(str(ROOT))
     manager = MCPManager()
     manager.load_configs(
         [MCPServerConfig(name="zvec_grep", url="http://127.0.0.1:7999/mcp")]
@@ -54,11 +59,19 @@ async def main() -> None:
     connection = await manager.connect_all()
     if connection.errors:
         raise RuntimeError("; ".join(connection.errors))
-    optimized_tool = CodeSearch(str(ROOT))
-    optimized_tool.set_mcp_manager(manager)
     try:
-        baseline = [await _run(baseline_tool, query, mode) for query, mode in QUERIES]
-        optimized = [await _run(optimized_tool, query, mode) for query, mode in QUERIES]
+        baseline = {
+            "semantic": SemanticSearch(str(ROOT)),
+            "exact": Grep(str(ROOT)),
+        }
+        optimized = {
+            "semantic": SemanticSearch(str(ROOT)),
+            "exact": Grep(str(ROOT)),
+        }
+        for tool in optimized.values():
+            tool.set_mcp_manager(manager)
+        baseline_rows = [await _run(baseline[mode], q, mode) for q, mode in QUERIES]
+        optimized_rows = [await _run(optimized[mode], q, mode) for q, mode in QUERIES]
     finally:
         await manager.shutdown()
 
@@ -66,12 +79,12 @@ async def main() -> None:
         "root": str(ROOT),
         "queries": len(QUERIES),
         "mcp_tools": sorted(tool.name for tool in connection.tools),
-        "baseline": baseline,
-        "optimized": optimized,
+        "baseline": baseline_rows,
+        "optimized": optimized_rows,
     }
     OUTPUT.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     lines = ["ZG retrieval A/B", f"queries: {len(QUERIES)}"]
-    for name, records in (("baseline", baseline), ("optimized", optimized)):
+    for name, records in (("baseline", baseline_rows), ("optimized", optimized_rows)):
         lines.extend(
             [
                 "",
