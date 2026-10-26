@@ -504,6 +504,40 @@ async def _run_prompt_with_client(
     if registry.is_progressive:
         registry.register(ToolSearchTool(registry, protocol=provider.protocol))
 
+    # Headless (-p) runs previously never initialised the configured MCP servers,
+    # so searches silently degraded to their local fallbacks. Mirror the
+    # interactive/remote wiring: connect the servers, hand the manager to
+    # Grep and SemanticSearch for zvec-grep routing, and hide the raw MCP
+    # tools from the model.
+    mcp_manager = None
+    if getattr(config, "mcp_servers", None):
+        from lantu.mcp.manager import MCPManager
+
+        mcp_manager = MCPManager()
+        mcp_manager.load_configs(config.mcp_servers)
+        connect_result = await mcp_manager.register_all_tools(registry)
+        for name in ("Grep", "SemanticSearch"):
+            tool = registry.get(name)
+            if tool is not None and hasattr(tool, "set_mcp_manager"):
+                tool.set_mcp_manager(mcp_manager)
+        for tool in connect_result.tools:
+            if tool.name.startswith("mcp_zvec_grep_"):
+                registry.disable(tool.name)
+        sections = [
+            f"## {server.name}\n{server.instructions}".rstrip()
+            for server in connect_result.servers
+        ]
+        if sections:
+            instructions = (
+                (instructions + "\n\n" if instructions else "")
+                + "# MCP Server Instructions\n\n"
+                "The following MCP servers have provided instructions for how to "
+                "use their tools and resources:\n\n"
+                + "\n\n".join(sections)
+            )
+        for err in connect_result.errors:
+            print(f"MCP warning: {err}", file=sys.stderr, flush=True)
+
     agent = Agent(
         client=client,
         registry=registry,
@@ -713,6 +747,8 @@ async def _run_prompt_with_client(
 
     # 如果有 team 在运行，轮询等待 teammate 完成
     if not team_manager._teams:
+        if mcp_manager is not None:
+            await mcp_manager.shutdown()
         return
 
     for i in range(90):
@@ -737,6 +773,9 @@ async def _run_prompt_with_client(
             emit_json({"type": "assistant", "text": last_result})
         else:
             print(last_result, flush=True)
+
+    if mcp_manager is not None:
+        await mcp_manager.shutdown()
 
 
 if __name__ == "__main__":

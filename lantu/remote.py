@@ -319,9 +319,10 @@ class RemoteServer:
         connect_result = await manager.register_all_tools(self.registry)
         self.mcp_manager = manager
 
-        code_search = self.registry.get("CodeSearch")
-        if code_search is not None and hasattr(code_search, "set_mcp_manager"):
-            code_search.set_mcp_manager(manager)
+        for name in ("Grep", "SemanticSearch"):
+            tool = self.registry.get(name)
+            if tool is not None and hasattr(tool, "set_mcp_manager"):
+                tool.set_mcp_manager(manager)
         for tool in connect_result.tools:
             if tool.name.startswith("mcp_zvec_grep_"):
                 self.registry.disable(tool.name)

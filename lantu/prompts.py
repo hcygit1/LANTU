@@ -109,13 +109,14 @@ USING_TOOLS_SECTION = PromptSection(
    - Use EditFile instead of sed or awk for editing files
    - Use WriteFile instead of echo/cat heredoc for creating files
    - Use Glob instead of find or ls for finding files
-   - Use Grep instead of grep or rg for searching file contents
+   - Searching this project's files: use Grep for literal strings, symbols, filenames, or regex; use SemanticSearch for concepts — architecture, call chains, or anything where you don't know the exact wording or location. Never shell out to grep, rg, ag, or ack to look through project contents.
+     - Grep and SemanticSearch cover this project only. Files outside it (system headers, installed packages, other checkouts) are not indexed — search those with Bash.
+     - Filtering another command's output (e.g. `pip list | grep foo`, `tail build.log | grep error`) is not a project search; keep that in Bash.
    - Reserve Bash exclusively for system commands and operations that require shell execution
  - You can call multiple tools in a single response. If tools are independent of each other, call them all in parallel for maximum efficiency. Only call tools sequentially when one depends on the result of another.
  - When running multiple independent Bash commands, make separate parallel tool calls rather than chaining with &&.
  - Use the Agent tool to delegate complex, multi-step tasks to specialized sub-agents.
- - When the user asks multiple agents to collaborate, form a team, or needs agents to communicate with each other, use TeamCreate to create a team, then spawn teammates with the Agent tool's team_name parameter. Teammates are long-running and communicate via SendMessage, unlike regular sub-agents which block and return inline.
- - Some specialized tools are deferred and not listed in your initial tool set. If you need a tool that isn't available, use ToolSearch to find and load it.""",
+ - When the user asks multiple agents to collaborate, form a team, or needs agents to communicate with each other, use TeamCreate to create a team, then spawn teammates with the Agent tool's team_name parameter. Teammates are long-running and communicate via SendMessage, unlike regular sub-agents which block and return inline.""",
 )
 
 TONE_STYLE_SECTION = PromptSection(

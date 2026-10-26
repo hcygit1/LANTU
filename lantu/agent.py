@@ -472,10 +472,10 @@ class Agent:
             self._stable_system_prompt += (
                 "\n\n## Repository Search\n"
                 "This workspace may provide a local persistent code index. Use "
-                "CodeSearch for repository search. Use exact mode when a known word, "
-                "symbol, filename, or regex can answer; use semantic mode for "
-                "architecture, call chains, dependencies, or cross-file questions "
-                "that exact lookup alone cannot answer. Results are bounded and may "
+                "Grep for repository search when a known word, symbol, filename, "
+                "or regex can answer; use SemanticSearch for architecture, call "
+                "chains, dependencies, or cross-file questions that literal "
+                "lookup alone cannot answer. Results are bounded and may "
                 "be stale; use ReadFile before making claims or edits."
             )
         return self._stable_system_prompt
@@ -972,10 +972,7 @@ class Agent:
                 tool_id=tc.tool_id,
                 tool_name=tc.tool_name,
                 result=ToolResult(
-                    output=(
-                        f"Error: tool '{tc.tool_name}' is not loaded. "
-                        "Use ToolSearch before calling it."
-                    ),
+                    output=self.registry.unavailable_reason(tc.tool_name),
                     is_error=True,
                 ),
                 elapsed=time.monotonic() - start,
@@ -1043,10 +1040,7 @@ class Agent:
 
         if not self.registry.is_model_visible(tc.tool_name):
             result = ToolResult(
-                output=(
-                    f"Error: tool '{tc.tool_name}' is not loaded. "
-                    "Use ToolSearch before calling it."
-                ),
+                output=self.registry.unavailable_reason(tc.tool_name),
                 is_error=True,
             )
             elapsed = time.monotonic() - start

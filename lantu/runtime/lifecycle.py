@@ -225,11 +225,12 @@ async def initialize_runtime_mcp(runtime: InteractiveRuntime) -> None:
         if runtime._closed:
             return
         runtime.mcp_manager = manager
-        code_search = runtime.registry.get("CodeSearch")
-        if code_search is not None and hasattr(code_search, "set_mcp_manager"):
-            code_search.set_mcp_manager(manager)
-        # CodeSearch owns zvec-grep routing and fallback. Keep its raw MCP
-        # tools available to the internal manager but hide them from the model.
+        # Grep and SemanticSearch own zvec-grep routing and fallback. Keep the
+        # raw MCP tools available to the internal manager but hidden from the model.
+        for name in ("Grep", "SemanticSearch"):
+            tool = runtime.registry.get(name)
+            if tool is not None and hasattr(tool, "set_mcp_manager"):
+                tool.set_mcp_manager(manager)
         for tool in result.tools:
             if tool.name.startswith("mcp_zvec_grep_"):
                 runtime.registry.disable(tool.name)

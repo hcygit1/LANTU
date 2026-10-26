@@ -1,43 +1,140 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
-from lantu.tools.grep import GREP_CONTEXT_CHARS, Grep, Params
+from lantu.tools.grep import Grep, Params
 
 
-@pytest.mark.asyncio
-async def test_grep_keeps_context_around_match_in_long_line(tmp_path) -> None:
-    path = tmp_path / "minified.js"
-    line = "a" * 5_000 + "NEEDLE" + "b" * 5_000
-    path.write_text(line, encoding="utf-8")
+class FakeMCP:
+    """Routes calls by zvec tool name; each name gets a fixed result or error."""
 
-    result = await Grep().execute(Params(pattern="NEEDLE", path=str(tmp_path)))
+    def __init__(
+        self,
+        results: dict[str, object] | None = None,
+        errors: dict[str, Exception] | None = None,
+    ) -> None:
+        self.results = results or {}
+        self.errors = errors or {}
+        self.calls: list[tuple[str, str, dict]] = []
 
-    assert not result.is_error
-    assert "NEEDLE" in result.output
-    assert len(result.output) < 2 * GREP_CONTEXT_CHARS + 100
-    assert result.output.startswith("minified.js:1:...")
-    assert result.output.endswith("...")
-
-
-@pytest.mark.asyncio
-async def test_grep_keeps_short_matching_lines_unchanged(tmp_path) -> None:
-    path = tmp_path / "sample.py"
-    path.write_text("before NEEDLE after", encoding="utf-8")
-
-    result = await Grep().execute(Params(pattern="NEEDLE", path=str(tmp_path)))
-
-    assert result.output == "sample.py:1:before NEEDLE after"
+    async def call_tool(self, server: str, name: str, arguments: dict) -> object:
+        self.calls.append((server, name, arguments))
+        if name in self.errors:
+            raise self.errors[name]
+        if name in self.results:
+            return self.results[name]
+        raise AssertionError(f"unexpected MCP tool call: {name}")
 
 
-@pytest.mark.asyncio
-async def test_grep_searches_a_single_file_path(tmp_path) -> None:
-    path = tmp_path / "artifact.txt"
-    path.write_text("before\nRECOVERY_CODE=LAN20260909_X7Q4\nafter", encoding="utf-8")
-
-    result = await Grep().execute(
-        Params(pattern="RECOVERY_CODE", path=str(path))
+def mcp_result(text: str, is_error: bool = False) -> object:
+    return SimpleNamespace(
+        isError=is_error,
+        content=[SimpleNamespace(text=text)],
     )
 
-    assert not result.is_error
-    assert result.output == "artifact.txt:2:RECOVERY_CODE=LAN20260909_X7Q4"
+
+@pytest.mark.asyncio
+async def test_exact_uses_zvec_grep_rg_first(tmp_path: Path) -> None:
+    tool = Grep(str(tmp_path))
+    manager = FakeMCP(results={"zvec_grep_rg": mcp_result("src/app.py:2:needle")})
+    tool.set_mcp_manager(manager)
+
+    result = await tool.execute(Params(pattern="needle"))
+
+    assert result.output == "src/app.py:2:needle"
+    assert result.meta == {"backend": "zvec_grep_rg", "degraded": False}
+    assert manager.calls[0][1] == "zvec_grep_rg"
+
+
+@pytest.mark.asyncio
+async def test_mcp_error_falls_back_to_python_grep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "app.py").write_text("x = 1  # needle\n")
+    tool = Grep(str(tmp_path))
+    tool.set_mcp_manager(FakeMCP(errors={"zvec_grep_rg": RuntimeError("offline")}))
+    monkeypatch.setattr("lantu.tools.grep.shutil.which", lambda _name: None)
+
+    result = await tool.execute(Params(pattern="needle"))
+
+    assert "app.py:1:" in result.output and "needle" in result.output
+    assert result.meta == {"backend": "python_grep", "degraded": True}
+
+
+@pytest.mark.asyncio
+async def test_without_manager_uses_host_rg_or_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "app.py").write_text("x = 1  # needle\n")
+    tool = Grep(str(tmp_path))
+    monkeypatch.setattr("lantu.tools.grep.shutil.which", lambda _name: None)
+
+    result = await tool.execute(Params(pattern="needle"))
+
+    assert "app.py:1:" in result.output and "needle" in result.output
+    assert result.meta == {"backend": "python_grep", "degraded": True}
+
+
+@pytest.mark.asyncio
+async def test_empty_result_retries_semantic_index(tmp_path: Path) -> None:
+    tool = Grep(str(tmp_path))
+    manager = FakeMCP(
+        results={
+            "zvec_grep_rg": mcp_result(""),
+            "zvec_grep_search": mcp_result("src/auth.py:10:validate_credentials()"),
+        }
+    )
+    tool.set_mcp_manager(manager)
+
+    result = await tool.execute(Params(pattern="credential validation flow"))
+
+    assert "src/auth.py:10" in result.output
+    assert "semantic index" in result.output
+    assert result.meta == {
+        "backend": "zvec_grep_search",
+        "degraded": False,
+        "semantic_retry": True,
+    }
+    assert [call[1] for call in manager.calls] == ["zvec_grep_rg", "zvec_grep_search"]
+
+
+@pytest.mark.asyncio
+async def test_nonempty_result_skips_semantic_retry(tmp_path: Path) -> None:
+    tool = Grep(str(tmp_path))
+    manager = FakeMCP(results={"zvec_grep_rg": mcp_result("src/app.py:1:needle")})
+    tool.set_mcp_manager(manager)
+
+    result = await tool.execute(Params(pattern="needle"))
+
+    assert result.output == "src/app.py:1:needle"
+    assert len(manager.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_semantic_retry_failure_returns_exact_empty(tmp_path: Path) -> None:
+    tool = Grep(str(tmp_path))
+    manager = FakeMCP(
+        results={"zvec_grep_rg": mcp_result("No matches found.")},
+        errors={"zvec_grep_search": RuntimeError("index missing")},
+    )
+    tool.set_mcp_manager(manager)
+
+    result = await tool.execute(Params(pattern="missing-thing"))
+
+    assert result.output == "No matches found."
+    assert result.meta == {"backend": "zvec_grep_rg", "degraded": False}
+
+
+@pytest.mark.asyncio
+async def test_invalid_regex_reports_error_without_retry(tmp_path: Path) -> None:
+    tool = Grep(str(tmp_path))
+    manager = FakeMCP(results={"zvec_grep_rg": mcp_result("(no output)", is_error=True)})
+    tool.set_mcp_manager(manager)
+
+    result = await tool.execute(Params(pattern="("))
+
+    assert result.is_error is True
+    assert "invalid regex" in result.output
