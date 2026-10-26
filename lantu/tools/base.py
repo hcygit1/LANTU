@@ -27,6 +27,11 @@ class Tool(ABC):
     is_concurrency_safe: bool = False
     is_system_tool: bool = False
     should_defer: bool = False
+    # Standard mode exposes only the explicitly approved base tools.  Progressive
+    # mode also exposes the small set of progressive entrypoints (for example
+    # ToolSearch) before deferred tools are activated.
+    expose_in_standard: bool = True
+    expose_in_progressive: bool = True
     work_dir: str | None = None
 
     @property

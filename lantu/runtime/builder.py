@@ -215,9 +215,10 @@ def _register_skills(runtime: InteractiveRuntime) -> None:
     exit_plan_mode_tool = ExitPlanModeTool()
     runtime.registry.register(load_skill_tool)
     runtime.registry.register(install_skill_tool)
-    runtime.registry.register(
-        ToolSearchTool(runtime.registry, protocol=runtime.provider.protocol)
-    )
+    if runtime.registry.is_progressive:
+        runtime.registry.register(
+            ToolSearchTool(runtime.registry, protocol=runtime.provider.protocol)
+        )
     runtime.registry.register(
         MemorySearchTool(
             runtime.memory_manager.user_mem_dir,

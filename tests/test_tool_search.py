@@ -96,8 +96,8 @@ def test_deferred_not_in_schemas():
     assert "DeferredBeta" not in names
 
 
-def test_standard_mode_exposes_deferred_tools_without_tool_search():
-    """Standard mode sends one fixed schema list and needs no ToolSearch."""
+def test_standard_mode_hides_deferred_tools_and_tool_search():
+    """Standard mode exposes only its fixed base tools."""
     reg = ToolRegistry(loading_mode="standard")
     reg.register(_NormalTool())
     reg.register(_DeferredTool())
@@ -106,9 +106,27 @@ def test_standard_mode_exposes_deferred_tools_without_tool_search():
     reg.register(ToolSearchTool(reg, protocol="anthropic"))
 
     names = {schema["name"] for schema in reg.get_all_schemas()}
-    assert names == {"NormalTool", "DeferredAlpha"}
-    assert reg.is_model_visible("DeferredAlpha")
+    assert names == {"NormalTool"}
+    assert not reg.is_model_visible("DeferredAlpha")
+    assert not reg.is_model_visible("ToolSearch")
     assert reg.get_deferred_tool_names() == []
+
+
+def test_progressive_initial_tools_match_standard_plus_tool_search():
+    standard = ToolRegistry(loading_mode="standard")
+    progressive = ToolRegistry(loading_mode="progressive")
+    for registry in (standard, progressive):
+        registry.register(_NormalTool())
+        registry.register(_DeferredTool())
+        registry.register(ToolSearchTool(registry, protocol="anthropic"))
+
+    standard_names = {schema["name"] for schema in standard.get_all_schemas()}
+    progressive_names = {
+        schema["name"] for schema in progressive.get_all_schemas()
+    }
+    assert progressive_names == standard_names | {"ToolSearch"}
+    assert "DeferredAlpha" not in progressive_names
+    assert progressive.get_deferred_tool_names() == ["DeferredAlpha"]
 
 
 def test_schema_epoch_is_stable_until_visible_schemas_change():
@@ -137,7 +155,7 @@ def test_schema_epoch_differs_between_loading_modes():
 
     assert progressive.epoch_id != standard.epoch_id
     assert "DeferredAlpha" not in progressive.visible_tools
-    assert "DeferredAlpha" in standard.visible_tools
+    assert "DeferredAlpha" not in standard.visible_tools
 
 @pytest.mark.asyncio
 async def test_tool_search_marks_discovered():

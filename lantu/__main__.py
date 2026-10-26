@@ -501,7 +501,8 @@ async def _run_prompt_with_client(
         loading_mode=getattr(config, "tool_loading_mode", "standard"),
         work_dir=work_dir,
     )
-    registry.register(ToolSearchTool(registry, protocol=provider.protocol))
+    if registry.is_progressive:
+        registry.register(ToolSearchTool(registry, protocol=provider.protocol))
 
     agent = Agent(
         client=client,

@@ -261,7 +261,10 @@ class RemoteServer:
             loading_mode=self.tool_loading_mode,
             work_dir=work_dir,
         )
-        self.registry.register(ToolSearchTool(self.registry, protocol=provider.protocol))
+        if self.registry.is_progressive:
+            self.registry.register(
+                ToolSearchTool(self.registry, protocol=provider.protocol)
+            )
 
         # Skill 加载
         self.skill_loader = SkillLoader(work_dir)

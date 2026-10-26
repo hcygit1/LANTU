@@ -89,7 +89,7 @@ async def test_build_runtime_registers_engineering_tools_and_closes_twice(
     offline_builder: FakeClient,
 ) -> None:
     runtime = await build_interactive_runtime(
-        AppConfig(providers=[provider]),
+        AppConfig(providers=[provider], tool_loading_mode="progressive"),
         provider,
         PermissionMode.DEFAULT,
         None,
@@ -124,6 +124,27 @@ async def test_build_runtime_registers_engineering_tools_and_closes_twice(
     assert sleeper.cancelled()
     assert runtime.session.closed
     assert offline_builder.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_standard_runtime_does_not_register_tool_search(
+    tmp_path: Path,
+    provider: ProviderConfig,
+    offline_builder: FakeClient,
+) -> None:
+    runtime = await build_interactive_runtime(
+        AppConfig(providers=[provider], tool_loading_mode="standard"),
+        provider,
+        PermissionMode.DEFAULT,
+        None,
+        tmp_path,
+    )
+
+    assert runtime.registry.get("ToolSearch") is None
+    assert "ToolSearch" not in {
+        schema["name"] for schema in runtime.registry.get_all_schemas()
+    }
+    await runtime.close()
 
 
 @pytest.mark.asyncio

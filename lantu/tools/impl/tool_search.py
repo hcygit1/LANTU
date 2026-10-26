@@ -26,6 +26,7 @@ class ToolSearchTool(Tool):
     category = "read"
     should_defer = False  # ToolSearch 自身永远不延迟加载
     expose_in_standard = False
+    expose_in_progressive = True
 
 
     def __init__(

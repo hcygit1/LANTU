@@ -161,8 +161,27 @@ class ToolRegistry:
         if tool is None or name in self._disabled:
             return False
         if not self.is_progressive:
-            return True
-        return not getattr(tool, "should_defer", False) or name in self._discovered
+            return (
+                not getattr(tool, "should_defer", False)
+                and getattr(tool, "expose_in_standard", True)
+            )
+        return (
+            (
+                not getattr(tool, "should_defer", False)
+                and getattr(tool, "expose_in_progressive", True)
+            )
+            or name in self._discovered
+        )
+
+    def unavailable_reason(self, name: str) -> str:
+        """模型调用了它当前看不到的工具时，返回给模型的说明。"""
+        tool = self._tools.get(name)
+        if self.is_progressive and tool is not None and getattr(tool, "should_defer", False):
+            return f"Error: tool '{name}' is not loaded. Use ToolSearch before calling it."
+        return (
+            f"Error: tool '{name}' is not available in the current tool-loading mode. "
+            "Use one of the tools provided in your tool set instead."
+        )
 
 
     def get_deferred_tool_names(self) -> list[str]:
@@ -233,6 +252,7 @@ class ToolRegistry:
                 for name, tool in self._tools.items()
                 if name not in self._disabled
                 and not getattr(tool, "should_defer", False)
+                and getattr(tool, "expose_in_progressive", True)
             ]
             names.extend(
                 name
@@ -245,6 +265,7 @@ class ToolRegistry:
                 name
                 for name, tool in self._tools.items()
                 if name not in self._disabled
+                and not getattr(tool, "should_defer", False)
                 and getattr(tool, "expose_in_standard", True)
             ]
 
