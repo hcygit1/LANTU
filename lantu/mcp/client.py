@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import signal
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -124,11 +125,57 @@ class MCPClient:
         self._session = None
         await self._cleanup_stack()
 
+    def _kill_descendant_processes(self) -> None:
+        """关栈前 SIGKILL 全部后代进程（MCP 子进程树）。SDK 的 stdio 退出会等
+        子进程死亡；zg 永不自行退出，否则 shutdown 永久挂起。"""
+        try:
+            pid = os.getpid()
+            children: dict[int, list[int]] = {}
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                try:
+                    with open(f"/proc/{entry}/stat") as f:
+                        data = f.read()
+                    l = data.rindex(")")
+                    fields = data[l + 2:].split()
+                    ppid = int(fields[1])
+                    children.setdefault(ppid, []).append(int(entry))
+                except (OSError, IndexError, ValueError):
+                    continue
+            to_kill: list[int] = []
+            frontier = [pid]
+            while frontier:
+                nxt = []
+                for p in frontier:
+                    for c in children.get(p, []):
+                        to_kill.append(c)
+                        nxt.append(c)
+                frontier = nxt
+            for p in to_kill:
+                try:
+                    os.kill(p, signal.SIGKILL)
+                except OSError:
+                    pass
+            if to_kill:
+                logger.info(
+                    "Killed %d descendant processes before MCP stack close",
+                    len(to_kill),
+                )
+        except OSError:
+            # macOS 无 /proc，自动降级为 no-op（仅容器内生效）
+            logger.debug("Cannot scan /proc for descendant processes", exc_info=True)
+
     async def _cleanup_stack(self) -> None:
         if self._stack is not None:
             stack = self._stack
             self._stack = None
+            self._kill_descendant_processes()
             try:
+                # 必须在原任务内直接 await：anyio cancel scope 的宿主任务是
+                # 进入它的外层任务，任何挪到别的 task 的做法（wait_for/
+                # asyncio.wait）都会让 CancelledError 击中外层任务导致崩溃。
+                # 子进程已被 SIGKILL，管道 EOF 后这里会立即正常返回。
                 await stack.__aexit__(None, None, None)
             except RuntimeError as e:
                 if "cancel scope" in str(e):
