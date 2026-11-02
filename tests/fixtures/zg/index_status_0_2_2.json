@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "io.modelcontextprotocol/serverInfo": {
+      "name": "zvec-grep",
+      "version": "0.2.2"
+    }
+  },
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"root\": \"/tmp/astropy\",\n  \"indexed\": true,\n  \"index_policy\": \"enabled\",\n  \"source\": \"index\",\n  \"persistent\": {\n    \"home\": \"/tmp/astropy/.zvec-grep\",\n    \"index_path\": \"/tmp/astropy/.zvec-grep/index.zvec\",\n    \"workspace_index\": {\n      \"id\": \"a831e00f-2f66-4dd4-9d1c-24fc97d0e5be\",\n      \"name\": \"astropy\",\n      \"path\": \"/tmp/astropy/.zvec-grep\",\n      \"root_paths\": [\n        {\n          \"absolute_path\": \"/tmp/astropy\",\n          \"recursive\": true\n        }\n      ],\n      \"embedding\": {\n        \"provider\": \"local\",\n        \"model\": \"potion-code-16m-v2\",\n        \"dimension\": 256,\n        \"metric\": \"cosine\"\n      },\n      \"index_version\": 1,\n      \"created_time\": 1792835574431,\n      \"updated_time\": 1792836041913\n    },\n    \"files\": {\n      \"stored\": 1811,\n      \"scanned\": 1811,\n      \"indexed\": 1811,\n      \"pending\": 0,\n      \"failed\": 0,\n      \"added\": 0,\n      \"modified\": 0,\n      \"deleted\": 0,\n      \"unchanged\": 1811,\n      \"entities\": 28204,\n      \"truncated_fragments\": 3\n    }\n  }\n}",
+      "annotations": null,
+      "meta": null
+    }
+  ],
+  "structuredContent": {
+    "root": "/tmp/astropy",
+    "indexed": true,
+    "index_policy": "enabled",
+    "source": "index",
+    "persistent": {
+      "home": "/tmp/astropy/.zvec-grep",
+      "index_path": "/tmp/astropy/.zvec-grep/index.zvec",
+      "workspace_index": {
+        "id": "a831e00f-2f66-4dd4-9d1c-24fc97d0e5be",
+        "name": "astropy",
+        "path": "/tmp/astropy/.zvec-grep",
+        "root_paths": [
+          {
+            "absolute_path": "/tmp/astropy",
+            "recursive": true
+          }
+        ],
+        "embedding": {
+          "provider": "local",
+          "model": "potion-code-16m-v2",
+          "dimension": 256,
+          "metric": "cosine"
+        },
+        "index_version": 1,
+        "created_time": 1792835574431,
+        "updated_time": 1792836041913
+      },
+      "files": {
+        "stored": 1811,
+        "scanned": 1811,
+        "indexed": 1811,
+        "pending": 0,
+        "failed": 0,
+        "added": 0,
+        "modified": 0,
+        "deleted": 0,
+        "unchanged": 1811,
+        "entities": 28204,
+        "truncated_fragments": 3
+      }
+    }
+  },
+  "isError": false
+}

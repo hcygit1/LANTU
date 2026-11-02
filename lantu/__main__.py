@@ -510,12 +510,25 @@ async def _run_prompt_with_client(
     # Grep and SemanticSearch for zvec-grep routing, and hide the raw MCP
     # tools from the model.
     mcp_manager = None
+    index_monitor = None
     if getattr(config, "mcp_servers", None):
         from lantu.mcp.manager import MCPManager
 
         mcp_manager = MCPManager()
         mcp_manager.load_configs(config.mcp_servers)
         connect_result = await mcp_manager.register_all_tools(registry)
+        from lantu.mcp.index_manager import IndexManager
+
+        index_manager = IndexManager(mcp_manager)
+        index_status = await index_manager.ensure_ready(work_dir)
+        if index_status.state != "unavailable":
+            index_monitor = asyncio.create_task(index_manager.monitor(work_dir))
+        if index_status.state not in {"ready", "unavailable"}:
+            print(
+                f"MCP warning: zvec-grep index is {index_status.state}",
+                file=sys.stderr,
+                flush=True,
+            )
         for name in ("Grep", "SemanticSearch"):
             tool = registry.get(name)
             if tool is not None and hasattr(tool, "set_mcp_manager"):
@@ -747,6 +760,8 @@ async def _run_prompt_with_client(
 
     # 如果有 team 在运行，轮询等待 teammate 完成
     if not team_manager._teams:
+        if index_monitor is not None:
+            index_monitor.cancel()
         if mcp_manager is not None:
             await mcp_manager.shutdown()
         return
@@ -775,6 +790,8 @@ async def _run_prompt_with_client(
             print(last_result, flush=True)
 
     if mcp_manager is not None:
+        if index_monitor is not None:
+            index_monitor.cancel()
         await mcp_manager.shutdown()
 
 

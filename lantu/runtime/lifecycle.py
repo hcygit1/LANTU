@@ -12,6 +12,7 @@ from lantu.commands.handlers.skill_register import register_skill_commands
 from lantu.conversation import ConversationManager, Message
 from lantu.hooks import HookContext
 from lantu.mcp import ConnectResult, MCPManager
+from lantu.mcp.index_manager import IndexManager
 from lantu.memory import RelevantMemory, find_relevant_memories
 from lantu.permissions import PathSandbox
 
@@ -225,6 +226,18 @@ async def initialize_runtime_mcp(runtime: InteractiveRuntime) -> None:
         if runtime._closed:
             return
         runtime.mcp_manager = manager
+        index_manager = IndexManager(manager)
+        index_status = await index_manager.ensure_ready(str(runtime.work_dir))
+        if index_status.state not in {"ready", "unavailable"}:
+            runtime.startup_messages.append(
+                f"MCP warning: zvec-grep index is {index_status.state}"
+            )
+        runtime.index_manager = index_manager
+        if index_status.state != "unavailable":
+            track_background_task(
+                runtime,
+                index_manager.monitor(str(runtime.work_dir)),
+            )
         # Grep and SemanticSearch own zvec-grep routing and fallback. Keep the
         # raw MCP tools available to the internal manager but hidden from the model.
         for name in ("Grep", "SemanticSearch"):

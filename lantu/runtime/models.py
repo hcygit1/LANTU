@@ -54,6 +54,7 @@ class InteractiveRuntime:
     install_skill_tool: Any
     exit_plan_mode_tool: Any
     mcp_manager: MCPManager | None = None
+    index_manager: Any = None
     mcp_instructions: str = ""
     mcp_task: asyncio.Task[None] | None = None
     background_tasks: set[asyncio.Task[Any]] = field(default_factory=set)

@@ -311,13 +311,18 @@ class RemoteServer:
 
     async def _init_mcp(self) -> None:
         """连接所有配置的 MCP 服务器，注册工具。"""
-        if not self._mcp_server_configs or self.registry is None:
+        if not self._mcp_server_configs or self.registry is None or self.agent is None:
             return
 
         manager = MCPManager()
         manager.load_configs(self._mcp_server_configs)
         connect_result = await manager.register_all_tools(self.registry)
         self.mcp_manager = manager
+        from lantu.mcp.index_manager import IndexManager
+
+        index_status = await IndexManager(manager).ensure_ready(self.agent.work_dir)
+        if index_status.state not in {"ready", "unavailable"}:
+            log.warning("ZG index is %s", index_status.state)
 
         for name in ("Grep", "SemanticSearch"):
             tool = self.registry.get(name)
