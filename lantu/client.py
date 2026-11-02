@@ -652,29 +652,17 @@ class OpenAICompatClient(LLMClient):
         active_calls: dict[int, dict[str, str]] = {}  # 索引 -> {id, name, args}
         reasoning_accum = ""
         stop_reason = "end_turn"
+        final_usage: Any = None
 
         try:
             response = await self._client.chat.completions.create(**kwargs)
             async for chunk in response:
+                if chunk.usage:
+                    # usage 可能出现在独立的空 choices chunk（OpenAI 官方），
+                    # 也可能挂在最后一个 finish_reason chunk 上（部分网关），
+                    # 统一记录，流结束后再产出 StreamEnd。
+                    final_usage = chunk.usage
                 if not chunk.choices:
-                    # 最后一个 chunk，只包含 usage 数据。
-                    if chunk.usage:
-                        # 部分兼容 provider 通过 prompt_tokens_details.cached_tokens
-                        # 上报 cache 命中数，大多数不上报（cache_read 保持 0）。
-                        # prompt_tokens 包含了缓存 token，需要减去以保持
-                        # input + cache_read 可加性。没有 provider 上报 creation 计数。
-                        details = getattr(
-                            chunk.usage, "prompt_tokens_details", None
-                        )
-                        cache_read = getattr(details, "cached_tokens", 0) or 0
-                        prompt_tokens = chunk.usage.prompt_tokens or 0
-                        yield StreamEnd(
-                            stop_reason=stop_reason,
-                            input_tokens=max(prompt_tokens - cache_read, 0),
-                            output_tokens=chunk.usage.completion_tokens or 0,
-                            cache_read=cache_read,
-                            cache_creation=0,
-                        )
                     continue
 
                 choice = chunk.choices[0]
@@ -735,6 +723,23 @@ class OpenAICompatClient(LLMClient):
                                 arguments=args,
                             )
                         active_calls.clear()
+
+            if final_usage is None:
+                raise LLMError("Model stream ended without usage data")
+            # 部分兼容 provider 通过 prompt_tokens_details.cached_tokens
+            # 上报 cache 命中数，大多数不上报（cache_read 保持 0）。
+            # prompt_tokens 包含了缓存 token，需要减去以保持
+            # input + cache_read 可加性。没有 provider 上报 creation 计数。
+            details = getattr(final_usage, "prompt_tokens_details", None)
+            cache_read = getattr(details, "cached_tokens", 0) or 0
+            prompt_tokens = final_usage.prompt_tokens or 0
+            yield StreamEnd(
+                stop_reason=stop_reason,
+                input_tokens=max(prompt_tokens - cache_read, 0),
+                output_tokens=final_usage.completion_tokens or 0,
+                cache_read=cache_read,
+                cache_creation=0,
+            )
 
         except _openai.AuthenticationError as e:
             raise AuthenticationError(f"Invalid API key: {e}") from e

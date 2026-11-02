@@ -124,3 +124,37 @@ async def test_openai_compat_passes_reasoning_effort_in_extra_body() -> None:
         "reasoning_effort": "low",
     }
     assert prepared[0]["extra_body"] == captured["extra_body"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('usage_in_choices', [True, False])
+async def test_usage_chunk_formats_preserve_counts_and_single_end(usage_in_choices):
+    client = OpenAICompatClient(ProviderConfig(
+        name='gateway', protocol='openai-compat', base_url='https://example.com/v1',
+        model='test-model', api_key='test-key',
+    ))
+    usage = SimpleNamespace(prompt_tokens=100, completion_tokens=12,
+                            prompt_tokens_details=SimpleNamespace(cached_tokens=80))
+
+    async def response_stream():
+        yield SimpleNamespace(choices=[SimpleNamespace(
+            delta=SimpleNamespace(content='done', tool_calls=None), finish_reason='stop',
+        )], usage=usage if usage_in_choices else None)
+        if not usage_in_choices:
+            yield SimpleNamespace(choices=[], usage=usage)
+
+    async def create(**kwargs):
+        return response_stream()
+
+    original = client._client
+    client._client = SimpleNamespace(chat=SimpleNamespace(
+        completions=SimpleNamespace(create=create)))
+    try:
+        events = [event async for event in client.stream(ConversationManager())]
+    finally:
+        client._client = original
+        await client.aclose()
+    ends = [event for event in events if isinstance(event, StreamEnd)]
+    assert len(ends) == 1
+    assert ends[0].stop_reason == 'end_turn'
+    assert (ends[0].input_tokens, ends[0].cache_read, ends[0].output_tokens) == (20, 80, 12)
