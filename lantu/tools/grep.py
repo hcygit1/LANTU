@@ -139,7 +139,10 @@ class Grep(Tool):
         parts = ["rg", "-n"]
         if params.include:
             parts.extend(["-g", params.include])
-        parts.extend([params.pattern, params.path])
+        # zg resolves ``root`` to its real path but not the search path inside
+        # ``command``, so a symlinked path (e.g. macOS /tmp) fails the
+        # "search path must stay within root" containment check. Resolve here.
+        parts.extend([params.pattern, str(Path(params.path).resolve())])
         return " ".join(json.dumps(part) for part in parts)
 
     async def _local_rg(self, params: Params) -> ToolResult | None:
