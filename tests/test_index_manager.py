@@ -9,11 +9,11 @@ from lantu.mcp.index_manager import IndexManager
 
 def result(data: object, error: bool = False) -> object:
     if isinstance(data, dict):
-        return SimpleNamespace(isError=error, content=[], structuredContent=data)
+        return SimpleNamespace(is_error=error, content=[], structured_content=data)
     return SimpleNamespace(
-        isError=error,
+        is_error=error,
         content=[SimpleNamespace(text=str(data))],
-        structuredContent=None,
+        structured_content=None,
     )
 
 
@@ -27,7 +27,7 @@ class FakeManager:
         return self
 
     async def list_tools(self):
-        return [SimpleNamespace(name=name, inputSchema={"properties": {
+        return [SimpleNamespace(name=name, input_schema={"properties": {
             **({self.root_key: {"type": "string"}} if self.root_key else {}),
             "wait": {"type": "boolean"},
         }}) for name in ("zvec_grep_index_status", "zvec_grep_index")]
@@ -181,7 +181,7 @@ async def test_captured_zg_0_2_2_status(text_only):
     fixture = Path(__file__).parent / 'fixtures/zg/index_status_0_2_2.json'
     response = CallToolResult.model_validate_json(fixture.read_text())
     if text_only:
-        response.structuredContent = None
+        response.structured_content = None
     manager = FakeManager([response])
     status = await IndexManager(manager).ensure_ready('/tmp/astropy')
     assert status.state == 'ready'
