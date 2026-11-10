@@ -114,7 +114,7 @@ class IndexManager:
                      if item.name == tool_name), None)
         if tool is None:
             raise RuntimeError(f"MCP tool unavailable: {tool_name}")
-        properties = tool.inputSchema.get("properties", {})
+        properties = tool.input_schema.get("properties", {})
         root_key = next((key for key in ("root", "path", "repo")
                          if key in properties), None)
         if root_key is None:
@@ -129,7 +129,7 @@ class IndexManager:
 
 
 def _structured(result: Any) -> dict | None:
-    data = getattr(result, "structuredContent", None)
+    data = getattr(result, "structured_content", None)
     if isinstance(data, dict):
         return data
     try:
@@ -140,7 +140,7 @@ def _structured(result: Any) -> dict | None:
 
 
 def _result_text(result: Any) -> str:
-    structured = getattr(result, "structuredContent", None)
+    structured = getattr(result, "structured_content", None)
     if structured:
         try:
             return json.dumps(structured, ensure_ascii=False)
