@@ -179,7 +179,7 @@ class TestMCPToolWrapper:
         tool_def = mcp_types.Tool(
             name="search_issues",
             description="Search GitHub issues",
-            inputSchema={
+            input_schema={
                 "type": "object",
                 "properties": {
                     "repo": {"type": "string"},
@@ -207,7 +207,7 @@ class TestMCPToolWrapper:
         tool_def = mcp_types.Tool(
             name="search",
             description="Search",
-            inputSchema=input_schema,
+            input_schema=input_schema,
         )
         mock_client = MagicMock()
         wrapper = MCPToolWrapper("srv", tool_def, mock_client)
@@ -240,7 +240,7 @@ class TestExtractText:
         from mcp import types as mcp_types
         from lantu.mcp.tool_wrapper import _extract_text
 
-        content = [mcp_types.ImageContent(type="image", data="...", mimeType="image/png")]
+        content = [mcp_types.ImageContent(type="image", data="...", mime_type="image/png")]
         assert "[image: image/png]" in _extract_text(content)
 
 # ===========================================================================
@@ -277,7 +277,7 @@ class TestMCPManagerPartialFailure:
                 mcp_types.Tool(
                     name="test_tool",
                     description="A test",
-                    inputSchema={"type": "object", "properties": {}},
+                    input_schema={"type": "object", "properties": {}},
                 )
             ]
 
